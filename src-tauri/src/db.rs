@@ -56,13 +56,13 @@ impl Database {
             // Determine the extension filename based on OS and architecture
             let extension_filename = Self::get_lembed_extension_filename();
             let lembed_path = resource_dir.join(&extension_filename);
-            
+
             // For load_extension, we need to strip the extension as SQLite adds it automatically
             // But since we have architecture-specific names, we'll use the full path
             // and strip just the platform extension (.so, .dylib, .dll)
             let lembed_path_str = lembed_path.to_str()
                 .ok_or("Invalid lembed path")?;
-            
+
             // Strip the extension (.so, .dylib, .dll) from the path
             let lembed_path_without_ext = if lembed_path_str.ends_with(".so") {
                 &lembed_path_str[..lembed_path_str.len() - 3]
@@ -73,8 +73,9 @@ impl Database {
             } else {
                 lembed_path_str
             };
-            
-            conn.load_extension(lembed_path_without_ext, None)
+
+            // Specify the entry point explicitly since we use architecture-specific filenames
+            conn.load_extension(lembed_path_without_ext, Some("sqlite3_lembed_init"))
                 .map_err(|e| format!("Failed to load sqlite-lembed extension from {}: {}", lembed_path_str, e))?;
         }
 
