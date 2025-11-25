@@ -1,8 +1,11 @@
+mod chunking;
 mod commands;
 mod db;
+mod embedding;
 mod models;
 
-use db::Database;
+use db::{Database, SharedDatabase};
+use std::sync::Arc;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -16,9 +19,20 @@ pub fn run() {
                 .expect("Failed to get app data directory");
 
             let database =
-                Database::new(app_data_dir).expect("Failed to initialize database");
+                Database::new(app_data_dir.clone()).expect("Failed to initialize database");
+
+            // Create a shared database reference for embedding tasks
+            // This creates a new connection to the same database file
+            let shared_conn = database
+                .new_connection()
+                .expect("Failed to create shared database connection");
+            let shared_db: SharedDatabase = Arc::new(Database {
+                conn: std::sync::Mutex::new(shared_conn),
+                db_path: database.db_path.clone(),
+            });
 
             app.manage(database);
+            app.manage(shared_db);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -33,6 +47,11 @@ pub fn run() {
             commands::delete_tag,
             commands::get_atoms_by_tag,
             commands::check_sqlite_vec,
+            commands::find_similar_atoms,
+            commands::search_atoms_semantic,
+            commands::retry_embedding,
+            commands::process_pending_embeddings,
+            commands::get_embedding_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

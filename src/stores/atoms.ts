@@ -7,6 +7,7 @@ export interface Atom {
   source_url: string | null;
   created_at: string;
   updated_at: string;
+  embedding_status: 'pending' | 'processing' | 'complete' | 'failed';
 }
 
 export interface Tag {
@@ -20,22 +21,67 @@ export interface AtomWithTags extends Atom {
   tags: Tag[];
 }
 
+export interface SemanticSearchResult {
+  id: string;
+  content: string;
+  source_url: string | null;
+  created_at: string;
+  updated_at: string;
+  embedding_status: 'pending' | 'processing' | 'complete' | 'failed';
+  tags: Tag[];
+  similarity_score: number;
+  matching_chunk_content: string;
+  matching_chunk_index: number;
+}
+
+export interface SimilarAtomResult {
+  id: string;
+  content: string;
+  source_url: string | null;
+  created_at: string;
+  updated_at: string;
+  embedding_status: 'pending' | 'processing' | 'complete' | 'failed';
+  tags: Tag[];
+  similarity_score: number;
+  matching_chunk_content: string;
+  matching_chunk_index: number;
+}
+
 interface AtomsStore {
   atoms: AtomWithTags[];
   isLoading: boolean;
   error: string | null;
+  
+  // New search state
+  semanticSearchQuery: string;
+  semanticSearchResults: SemanticSearchResult[] | null;  // null = not searching
+  isSearching: boolean;
+  
+  // Existing methods
   fetchAtoms: () => Promise<void>;
   fetchAtomsByTag: (tagId: string) => Promise<void>;
   createAtom: (content: string, sourceUrl?: string, tagIds?: string[]) => Promise<AtomWithTags>;
   updateAtom: (id: string, content: string, sourceUrl?: string, tagIds?: string[]) => Promise<AtomWithTags>;
   deleteAtom: (id: string) => Promise<void>;
   clearError: () => void;
+  
+  // New methods
+  updateAtomStatus: (atomId: string, status: string) => void;
+  searchSemantic: (query: string) => Promise<void>;
+  clearSemanticSearch: () => void;
+  setSemanticSearchQuery: (query: string) => void;
+  retryEmbedding: (atomId: string) => Promise<void>;
 }
 
 export const useAtomsStore = create<AtomsStore>((set) => ({
   atoms: [],
   isLoading: false,
   error: null,
+  
+  // New search state
+  semanticSearchQuery: '',
+  semanticSearchResults: null,
+  isSearching: false,
 
   fetchAtoms: async () => {
     set({ isLoading: true, error: null });
@@ -106,5 +152,57 @@ export const useAtomsStore = create<AtomsStore>((set) => ({
   },
 
   clearError: () => set({ error: null }),
+  
+  // New methods
+  updateAtomStatus: (atomId: string, status: string) => {
+    set((state) => ({
+      atoms: state.atoms.map((a) =>
+        a.id === atomId
+          ? { ...a, embedding_status: status as Atom['embedding_status'] }
+          : a
+      ),
+    }));
+  },
+  
+  searchSemantic: async (query: string) => {
+    set({ isSearching: true, error: null, semanticSearchQuery: query });
+    try {
+      const results = await invoke<SemanticSearchResult[]>('search_atoms_semantic', {
+        query,
+        limit: 20,
+        threshold: 0.3,
+      });
+      set({ semanticSearchResults: results, isSearching: false });
+    } catch (error) {
+      set({ error: String(error), isSearching: false });
+    }
+  },
+  
+  clearSemanticSearch: () => {
+    set({
+      semanticSearchResults: null,
+      semanticSearchQuery: '',
+    });
+  },
+  
+  setSemanticSearchQuery: (query: string) => {
+    set({ semanticSearchQuery: query });
+  },
+  
+  retryEmbedding: async (atomId: string) => {
+    set({ error: null });
+    try {
+      await invoke('retry_embedding', { atomId });
+      // Update the atom status to 'pending' optimistically
+      set((state) => ({
+        atoms: state.atoms.map((a) =>
+          a.id === atomId ? { ...a, embedding_status: 'pending' as const } : a
+        ),
+      }));
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
 }));
 

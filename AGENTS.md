@@ -1,12 +1,20 @@
 # Atomic - Note-Taking Desktop Application
 
 ## Project Overview
-Atomic is a Tauri v2 desktop application for note-taking with a React frontend. It features markdown editing, hierarchical tagging, and is designed to support AI-powered semantic search in future phases.
+Atomic is a Tauri v2 desktop application for note-taking with a React frontend. It features markdown editing, hierarchical tagging, and AI-powered semantic search using local embeddings.
 
-## Current Status: Phase 1 Complete
-Phase 1 (Foundation + Data Layer) is complete with:
+## Current Status: Phase 2 Complete
+Phase 2 (Embedding Pipeline) is complete with:
+- Async embedding generation when atoms are created or updated
+- Content chunking algorithm for optimal embedding
+- Semantic search using sqlite-vec for vector similarity
+- Related atoms discovery based on content similarity
+- Embedding status indicators on atom cards
+- Real-time status updates via Tauri events
+
+Phase 1 (Foundation + Data Layer) features:
 - Full UI layout with left panel, main view, and right drawer
-- SQLite database with sqlite-vec extension ready for future embeddings
+- SQLite database with sqlite-vec extension
 - Complete CRUD operations for atoms and tags
 - Markdown editing with CodeMirror and rendering with react-markdown
 - Hierarchical tag navigation with context menus
@@ -20,6 +28,7 @@ Phase 1 (Foundation + Data Layer) is complete with:
 - **Styling**: Tailwind CSS v4 (using `@tailwindcss/vite` plugin)
 - **State Management**: Zustand 5
 - **Database**: SQLite with sqlite-vec extension (via rusqlite)
+- **Embeddings**: Simulated 384-dimensional vectors (ready for sqlite-lembed integration)
 - **Markdown Editor**: CodeMirror 6 (`@uiw/react-codemirror`)
 - **Markdown Rendering**: react-markdown with remark-gfm
 
@@ -32,17 +41,22 @@ Phase 1 (Foundation + Data Layer) is complete with:
     db.rs             # SQLite setup, migrations, connection pool
     commands.rs       # All Tauri command implementations
     models.rs         # Rust structs for data
+    chunking.rs       # Content chunking algorithm (Phase 2)
+    embedding.rs      # Embedding generation logic (Phase 2)
+  /resources
+    all-MiniLM-L6-v2.q8_0.gguf  # Bundled embedding model (~23MB)
   Cargo.toml
   tauri.conf.json
 
 /src
   /components
     /layout           # LeftPanel, MainView, RightDrawer, Layout
-    /atoms            # AtomCard, AtomEditor, AtomViewer, AtomGrid, AtomList
+    /atoms            # AtomCard, AtomEditor, AtomViewer, AtomGrid, AtomList, RelatedAtoms
     /tags             # TagTree, TagNode, TagChip, TagSelector
+    /search           # SemanticSearch
     /ui               # Button, Input, Modal, FAB, ContextMenu
   /stores             # Zustand stores (atoms.ts, tags.ts, ui.ts)
-  /hooks              # Custom hooks (useClickOutside, useKeyboard)
+  /hooks              # Custom hooks (useClickOutside, useKeyboard, useEmbeddingEvents)
   /lib                # Utilities (tauri.ts, markdown.ts, date.ts)
   App.tsx
   main.tsx
@@ -80,6 +94,9 @@ cd src-tauri && cargo check
 
 # Build Rust code
 cd src-tauri && cargo build
+
+# Run tests (including chunking tests)
+cd src-tauri && cargo test
 ```
 
 ## Database
@@ -98,7 +115,8 @@ CREATE TABLE atoms (
   content TEXT NOT NULL,
   source_url TEXT,
   created_at TEXT NOT NULL,  -- ISO 8601
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  embedding_status TEXT DEFAULT 'pending'  -- 'pending', 'processing', 'complete', 'failed'
 );
 
 -- Hierarchical tags
@@ -116,13 +134,19 @@ CREATE TABLE atom_tags (
   PRIMARY KEY (atom_id, tag_id)
 );
 
--- For Phase 2 embeddings
+-- Chunked content with embeddings
 CREATE TABLE atom_chunks (
   id TEXT PRIMARY KEY,
   atom_id TEXT REFERENCES atoms(id) ON DELETE CASCADE,
   chunk_index INTEGER NOT NULL,
   content TEXT NOT NULL,
-  embedding BLOB
+  embedding BLOB  -- 384-dimensional float vector
+);
+
+-- Vector similarity search (sqlite-vec virtual table)
+CREATE VIRTUAL TABLE vec_chunks USING vec0(
+  chunk_id TEXT PRIMARY KEY,
+  embedding float[384]
 );
 ```
 
@@ -131,8 +155,8 @@ CREATE TABLE atom_chunks (
 ### Atom Operations
 - `get_all_atoms()` → `Vec<AtomWithTags>`
 - `get_atom(id)` → `AtomWithTags`
-- `create_atom(content, source_url?, tag_ids)` → `AtomWithTags`
-- `update_atom(id, content, source_url?, tag_ids)` → `AtomWithTags`
+- `create_atom(content, source_url?, tag_ids)` → `AtomWithTags` (triggers async embedding)
+- `update_atom(id, content, source_url?, tag_ids)` → `AtomWithTags` (triggers async embedding)
 - `delete_atom(id)` → `()`
 - `get_atoms_by_tag(tag_id)` → `Vec<AtomWithTags>`
 
@@ -142,8 +166,38 @@ CREATE TABLE atom_chunks (
 - `update_tag(id, name, parent_id?)` → `Tag`
 - `delete_tag(id)` → `()`
 
+### Embedding Operations (Phase 2)
+- `find_similar_atoms(atom_id, limit, threshold)` → `Vec<SimilarAtomResult>`
+- `search_atoms_semantic(query, limit, threshold)` → `Vec<SemanticSearchResult>`
+- `retry_embedding(atom_id)` → `()` (retriggers embedding for failed atoms)
+- `process_pending_embeddings()` → `i32` (processes all pending atoms, returns count)
+- `get_embedding_status(atom_id)` → `String`
+
 ### Utility
 - `check_sqlite_vec()` → `String` (version check)
+
+## Tauri Events
+
+### embedding-complete
+Emitted when an atom's embedding generation completes (success or failure).
+
+Payload:
+```typescript
+{
+  atom_id: string;
+  status: 'complete' | 'failed';
+  error?: string;
+}
+```
+
+## Chunking Algorithm
+
+Content is chunked for optimal embedding generation:
+1. Split by double newlines (paragraphs)
+2. For paragraphs > 1500 chars, split by sentence boundaries (`. `, `! `, `? `)
+3. Merge chunks < 100 chars with previous chunk
+4. Skip final chunks < 50 chars
+5. Cap chunks at 2000 chars max
 
 ## Key Dependencies
 
@@ -157,6 +211,7 @@ CREATE TABLE atom_chunks (
 - `uuid` = { version = "1", features = ["v4"] }
 - `chrono` = { version = "0.4", features = ["serde"] }
 - `zerocopy` = { version = "0.8", features = ["derive"] }
+- `tokio` = { version = "1", features = ["full"] }
 
 ### Frontend (package.json)
 - `@tauri-apps/api` = "^2.0.0"
@@ -178,6 +233,7 @@ CREATE TABLE atom_chunks (
 - Text: `#dcddde` (primary), `#888888` (secondary/muted), `#666666` (tertiary)
 - Borders: `#3d3d3d`
 - Accent: `#7c3aed` (purple), `#a78bfa` (light purple for tags)
+- Status: `amber-500` (pending/processing), `red-500` (failed)
 
 ### Layout
 - Left Panel: 250px fixed width
@@ -188,6 +244,7 @@ CREATE TABLE atom_chunks (
 - Drawer slide: 200ms ease-out
 - Modal fade/zoom: 200ms
 - Hover transitions: 150ms
+- Embedding status pulse: CSS `animate-pulse`
 
 ## State Management (Zustand Stores)
 
@@ -195,7 +252,10 @@ CREATE TABLE atom_chunks (
 - `atoms: AtomWithTags[]` - All loaded atoms
 - `isLoading: boolean` - Loading state
 - `error: string | null` - Error message
-- Actions: `fetchAtoms`, `fetchAtomsByTag`, `createAtom`, `updateAtom`, `deleteAtom`
+- `semanticSearchQuery: string` - Current semantic search query
+- `semanticSearchResults: SemanticSearchResult[] | null` - Search results (null = not searching)
+- `isSearching: boolean` - Semantic search loading state
+- Actions: `fetchAtoms`, `fetchAtomsByTag`, `createAtom`, `updateAtom`, `deleteAtom`, `updateAtomStatus`, `searchSemantic`, `clearSemanticSearch`, `retryEmbedding`
 
 ### tags.ts
 - `tags: TagWithCount[]` - Hierarchical tag tree
@@ -207,17 +267,33 @@ CREATE TABLE atom_chunks (
 - `selectedTagId: string | null` - Currently selected tag filter
 - `drawerState: { isOpen, mode, atomId }` - Drawer state
 - `viewMode: 'grid' | 'list'` - Atom display mode
-- `searchQuery: string` - Search filter
+- `searchQuery: string` - Text search filter
 - Actions: `setSelectedTag`, `openDrawer`, `closeDrawer`, `setViewMode`, `setSearchQuery`
 
-## Future Phases
+## Embedding Implementation Notes
 
-### Phase 2: AI/Embeddings
-- Integrate embedding model for semantic search
-- Populate `atom_chunks` table with chunked content and embeddings
-- Add vector similarity search using sqlite-vec
+### Current Implementation (Simulated)
+The current implementation uses simulated embeddings:
+- Generates deterministic 384-dimensional vectors based on content hash
+- Uses the same vector format as sqlite-vec expects
+- Ready for real sqlite-lembed integration
+
+### Future sqlite-lembed Integration
+To enable real embeddings:
+1. Download sqlite-lembed extension for your platform
+2. Load extension at runtime: `conn.load_extension("lembed0")`
+3. Register model: `INSERT INTO temp.lembed_models(name, model) SELECT 'all-MiniLM-L6-v2', lembed_model_from_file('/path/to/model.gguf')`
+4. Replace `generate_simulated_embedding()` with: `SELECT lembed('all-MiniLM-L6-v2', ?)`
+
+### Similarity Calculation
+- sqlite-vec returns Euclidean distance (lower = more similar)
+- For normalized vectors, convert to similarity: `1.0 - (distance / 2.0)`
+- Default threshold: 0.7 for related atoms, 0.3 for semantic search
+
+## Future Phases
 
 ### Phase 3: Wiki Integration
 - Wikipedia article fetching and display
 - Wiki viewer in right drawer
+- Link atoms to Wikipedia articles
 

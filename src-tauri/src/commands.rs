@@ -1,6 +1,11 @@
-use crate::db::Database;
-use crate::models::{Atom, AtomWithTags, Tag, TagWithCount};
+use crate::db::{Database, SharedDatabase};
+use crate::embedding::{
+    distance_to_similarity, embedding_to_blob, generate_simulated_embedding, spawn_embedding_task,
+};
+use crate::models::{Atom, AtomWithTags, SemanticSearchResult, SimilarAtomResult, Tag, TagWithCount};
 use chrono::Utc;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tauri::State;
 use uuid::Uuid;
 
@@ -38,7 +43,7 @@ pub fn get_all_atoms(db: State<Database>) -> Result<Vec<AtomWithTags>, String> {
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, content, source_url, created_at, updated_at FROM atoms ORDER BY updated_at DESC",
+            "SELECT id, content, source_url, created_at, updated_at, COALESCE(embedding_status, 'pending') FROM atoms ORDER BY updated_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -50,6 +55,7 @@ pub fn get_all_atoms(db: State<Database>) -> Result<Vec<AtomWithTags>, String> {
                 source_url: row.get(2)?,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
+                embedding_status: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -71,7 +77,7 @@ pub fn get_atom(db: State<Database>, id: String) -> Result<AtomWithTags, String>
 
     let atom: Atom = conn
         .query_row(
-            "SELECT id, content, source_url, created_at, updated_at FROM atoms WHERE id = ?1",
+            "SELECT id, content, source_url, created_at, updated_at, COALESCE(embedding_status, 'pending') FROM atoms WHERE id = ?1",
             [&id],
             |row| {
                 Ok(Atom {
@@ -80,6 +86,7 @@ pub fn get_atom(db: State<Database>, id: String) -> Result<AtomWithTags, String>
                     source_url: row.get(2)?,
                     created_at: row.get(3)?,
                     updated_at: row.get(4)?,
+                    embedding_status: row.get(5)?,
                 })
             },
         )
@@ -91,7 +98,9 @@ pub fn get_atom(db: State<Database>, id: String) -> Result<AtomWithTags, String>
 
 #[tauri::command]
 pub fn create_atom(
+    app_handle: tauri::AppHandle,
     db: State<Database>,
+    shared_db: State<SharedDatabase>,
     content: String,
     source_url: Option<String>,
     tag_ids: Vec<String>,
@@ -100,10 +109,11 @@ pub fn create_atom(
 
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
+    let embedding_status = "pending";
 
     conn.execute(
-        "INSERT INTO atoms (id, content, source_url, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        (&id, &content, &source_url, &now, &now),
+        "INSERT INTO atoms (id, content, source_url, created_at, updated_at, embedding_status) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        (&id, &content, &source_url, &now, &now, &embedding_status),
     )
     .map_err(|e| e.to_string())?;
 
@@ -118,19 +128,34 @@ pub fn create_atom(
 
     let atom = Atom {
         id: id.clone(),
-        content,
+        content: content.clone(),
         source_url,
         created_at: now.clone(),
         updated_at: now,
+        embedding_status: embedding_status.to_string(),
     };
 
     let tags = get_tags_for_atom(&conn, &id)?;
+    
+    // Drop the connection lock before spawning the embedding task
+    drop(conn);
+    
+    // Spawn embedding task (non-blocking)
+    spawn_embedding_task(
+        app_handle,
+        Arc::clone(&shared_db),
+        id,
+        content,
+    );
+
     Ok(AtomWithTags { atom, tags })
 }
 
 #[tauri::command]
 pub fn update_atom(
+    app_handle: tauri::AppHandle,
     db: State<Database>,
+    shared_db: State<SharedDatabase>,
     id: String,
     content: String,
     source_url: Option<String>,
@@ -139,10 +164,11 @@ pub fn update_atom(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     let now = Utc::now().to_rfc3339();
+    let embedding_status = "pending"; // Reset to pending when content changes
 
     conn.execute(
-        "UPDATE atoms SET content = ?1, source_url = ?2, updated_at = ?3 WHERE id = ?4",
-        (&content, &source_url, &now, &id),
+        "UPDATE atoms SET content = ?1, source_url = ?2, updated_at = ?3, embedding_status = ?4 WHERE id = ?5",
+        (&content, &source_url, &now, &embedding_status, &id),
     )
     .map_err(|e| e.to_string())?;
 
@@ -161,7 +187,7 @@ pub fn update_atom(
     // Get the updated atom
     let atom: Atom = conn
         .query_row(
-            "SELECT id, content, source_url, created_at, updated_at FROM atoms WHERE id = ?1",
+            "SELECT id, content, source_url, created_at, updated_at, COALESCE(embedding_status, 'pending') FROM atoms WHERE id = ?1",
             [&id],
             |row| {
                 Ok(Atom {
@@ -170,12 +196,25 @@ pub fn update_atom(
                     source_url: row.get(2)?,
                     created_at: row.get(3)?,
                     updated_at: row.get(4)?,
+                    embedding_status: row.get(5)?,
                 })
             },
         )
         .map_err(|e| e.to_string())?;
 
     let tags = get_tags_for_atom(&conn, &id)?;
+    
+    // Drop the connection lock before spawning the embedding task
+    drop(conn);
+    
+    // Spawn embedding task (non-blocking)
+    spawn_embedding_task(
+        app_handle,
+        Arc::clone(&shared_db),
+        id,
+        content,
+    );
+
     Ok(AtomWithTags { atom, tags })
 }
 
@@ -310,7 +349,7 @@ pub fn get_atoms_by_tag(db: State<Database>, tag_id: String) -> Result<Vec<AtomW
 
     let mut stmt = conn
         .prepare(
-            "SELECT a.id, a.content, a.source_url, a.created_at, a.updated_at 
+            "SELECT a.id, a.content, a.source_url, a.created_at, a.updated_at, COALESCE(a.embedding_status, 'pending')
              FROM atoms a
              INNER JOIN atom_tags at ON a.id = at.atom_id
              WHERE at.tag_id = ?1
@@ -326,6 +365,7 @@ pub fn get_atoms_by_tag(db: State<Database>, tag_id: String) -> Result<Vec<AtomW
                 source_url: row.get(2)?,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
+                embedding_status: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -351,5 +391,346 @@ pub fn check_sqlite_vec(db: State<Database>) -> Result<String, String> {
         .map_err(|e| format!("sqlite-vec not loaded: {}", e))?;
 
     Ok(version)
+}
+
+// Embedding-related commands
+
+/// Find similar atoms based on vector similarity
+/// 1. Get all chunks for the given atom
+/// 2. For each chunk, find similar chunks in vec_chunks
+/// 3. Filter by threshold (convert distance to similarity)
+/// 4. Deduplicate by parent atom_id, keep highest similarity
+/// 5. Exclude the source atom itself
+/// 6. Return up to `limit` results
+#[tauri::command]
+pub fn find_similar_atoms(
+    db: State<Database>,
+    atom_id: String,
+    limit: i32,
+    threshold: f32,
+) -> Result<Vec<SimilarAtomResult>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    // 1. Get all chunks for the given atom
+    let mut stmt = conn
+        .prepare("SELECT id, embedding FROM atom_chunks WHERE atom_id = ?1")
+        .map_err(|e| format!("Failed to prepare chunk query: {}", e))?;
+
+    let source_chunks: Vec<(String, Vec<u8>)> = stmt
+        .query_map([&atom_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| format!("Failed to query chunks: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to collect chunks: {}", e))?;
+
+    if source_chunks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Map to store best similarity per atom_id
+    let mut atom_similarities: HashMap<String, (f32, String, i32)> = HashMap::new();
+
+    // 2. For each source chunk, find similar chunks
+    for (_, embedding_blob) in &source_chunks {
+        // Query vec_chunks for similar chunks
+        let mut vec_stmt = conn
+            .prepare(
+                "SELECT chunk_id, distance 
+                 FROM vec_chunks 
+                 WHERE embedding MATCH ?1
+                 ORDER BY distance
+                 LIMIT ?2",
+            )
+            .map_err(|e| format!("Failed to prepare vec query: {}", e))?;
+
+        let similar_chunks: Vec<(String, f32)> = vec_stmt
+            .query_map(rusqlite::params![embedding_blob, limit * 10], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .map_err(|e| format!("Failed to query similar chunks: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to collect similar chunks: {}", e))?;
+
+        // 3. For each similar chunk, get its parent atom and check threshold
+        for (chunk_id, distance) in similar_chunks {
+            let similarity = distance_to_similarity(distance);
+
+            if similarity < threshold {
+                continue;
+            }
+
+            // Get the parent atom_id and chunk info for this chunk
+            let chunk_info: Result<(String, String, i32), _> = conn.query_row(
+                "SELECT atom_id, content, chunk_index FROM atom_chunks WHERE id = ?1",
+                [&chunk_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            );
+
+            if let Ok((parent_atom_id, chunk_content, chunk_index)) = chunk_info {
+                // 5. Exclude the source atom itself
+                if parent_atom_id == atom_id {
+                    continue;
+                }
+
+                // 4. Keep highest similarity per atom
+                let entry = atom_similarities.entry(parent_atom_id.clone());
+                match entry {
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        if similarity > e.get().0 {
+                            e.insert((similarity, chunk_content, chunk_index));
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert((similarity, chunk_content, chunk_index));
+                    }
+                }
+            }
+        }
+    }
+
+    // 6. Build results, sorted by similarity
+    let mut results: Vec<(String, f32, String, i32)> = atom_similarities
+        .into_iter()
+        .map(|(atom_id, (sim, content, idx))| (atom_id, sim, content, idx))
+        .collect();
+
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(limit as usize);
+
+    // Fetch full atom data for results
+    let mut final_results = Vec::new();
+    for (result_atom_id, similarity, chunk_content, chunk_index) in results {
+        let atom: Atom = conn
+            .query_row(
+                "SELECT id, content, source_url, created_at, updated_at, COALESCE(embedding_status, 'pending') FROM atoms WHERE id = ?1",
+                [&result_atom_id],
+                |row| {
+                    Ok(Atom {
+                        id: row.get(0)?,
+                        content: row.get(1)?,
+                        source_url: row.get(2)?,
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                        embedding_status: row.get(5)?,
+                    })
+                },
+            )
+            .map_err(|e| format!("Failed to get atom: {}", e))?;
+
+        let tags = get_tags_for_atom(&conn, &result_atom_id)?;
+
+        final_results.push(SimilarAtomResult {
+            atom: AtomWithTags { atom, tags },
+            similarity_score: similarity,
+            matching_chunk_content: chunk_content,
+            matching_chunk_index: chunk_index,
+        });
+    }
+
+    Ok(final_results)
+}
+
+/// Search atoms semantically using a query string
+/// 1. Generate embedding for query text (simulated)
+/// 2. Search vec_chunks for similar chunks
+/// 3. Filter by threshold
+/// 4. Deduplicate by parent atom_id
+/// 5. Return atoms with matching chunk content
+#[tauri::command]
+pub fn search_atoms_semantic(
+    db: State<Database>,
+    query: String,
+    limit: i32,
+    threshold: f32,
+) -> Result<Vec<SemanticSearchResult>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    // 1. Generate embedding for query text
+    let query_embedding = generate_simulated_embedding(&query);
+    let query_blob = embedding_to_blob(&query_embedding);
+
+    // 2. Search vec_chunks for similar chunks
+    let mut vec_stmt = conn
+        .prepare(
+            "SELECT chunk_id, distance 
+             FROM vec_chunks 
+             WHERE embedding MATCH ?1
+             ORDER BY distance
+             LIMIT ?2",
+        )
+        .map_err(|e| format!("Failed to prepare vec query: {}", e))?;
+
+    let similar_chunks: Vec<(String, f32)> = vec_stmt
+        .query_map(rusqlite::params![&query_blob, limit * 10], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .map_err(|e| format!("Failed to query similar chunks: {}", e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to collect similar chunks: {}", e))?;
+
+    // Map to store best similarity per atom_id
+    let mut atom_similarities: HashMap<String, (f32, String, i32)> = HashMap::new();
+
+    // 3. Filter by threshold and deduplicate
+    for (chunk_id, distance) in similar_chunks {
+        let similarity = distance_to_similarity(distance);
+
+        if similarity < threshold {
+            continue;
+        }
+
+        // Get the parent atom_id and chunk info
+        let chunk_info: Result<(String, String, i32), _> = conn.query_row(
+            "SELECT atom_id, content, chunk_index FROM atom_chunks WHERE id = ?1",
+            [&chunk_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        );
+
+        if let Ok((parent_atom_id, chunk_content, chunk_index)) = chunk_info {
+            // 4. Keep highest similarity per atom
+            let entry = atom_similarities.entry(parent_atom_id.clone());
+            match entry {
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    if similarity > e.get().0 {
+                        e.insert((similarity, chunk_content, chunk_index));
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert((similarity, chunk_content, chunk_index));
+                }
+            }
+        }
+    }
+
+    // 5. Build results, sorted by similarity
+    let mut results: Vec<(String, f32, String, i32)> = atom_similarities
+        .into_iter()
+        .map(|(atom_id, (sim, content, idx))| (atom_id, sim, content, idx))
+        .collect();
+
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(limit as usize);
+
+    // Fetch full atom data for results
+    let mut final_results = Vec::new();
+    for (result_atom_id, similarity, chunk_content, chunk_index) in results {
+        let atom: Atom = conn
+            .query_row(
+                "SELECT id, content, source_url, created_at, updated_at, COALESCE(embedding_status, 'pending') FROM atoms WHERE id = ?1",
+                [&result_atom_id],
+                |row| {
+                    Ok(Atom {
+                        id: row.get(0)?,
+                        content: row.get(1)?,
+                        source_url: row.get(2)?,
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                        embedding_status: row.get(5)?,
+                    })
+                },
+            )
+            .map_err(|e| format!("Failed to get atom: {}", e))?;
+
+        let tags = get_tags_for_atom(&conn, &result_atom_id)?;
+
+        final_results.push(SemanticSearchResult {
+            atom: AtomWithTags { atom, tags },
+            similarity_score: similarity,
+            matching_chunk_content: chunk_content,
+            matching_chunk_index: chunk_index,
+        });
+    }
+
+    Ok(final_results)
+}
+
+/// Retry embedding generation for a failed atom
+/// Reset status to 'pending' and trigger embedding again
+#[tauri::command]
+pub fn retry_embedding(
+    app_handle: tauri::AppHandle,
+    db: State<Database>,
+    shared_db: State<SharedDatabase>,
+    atom_id: String,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    // Get the atom content
+    let content: String = conn
+        .query_row(
+            "SELECT content FROM atoms WHERE id = ?1",
+            [&atom_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Failed to get atom: {}", e))?;
+
+    // Reset status to pending
+    conn.execute(
+        "UPDATE atoms SET embedding_status = 'pending' WHERE id = ?1",
+        [&atom_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Drop the connection lock before spawning the embedding task
+    drop(conn);
+
+    // Spawn embedding task
+    spawn_embedding_task(app_handle, Arc::clone(&shared_db), atom_id, content);
+
+    Ok(())
+}
+
+/// Trigger embedding generation for all atoms with 'pending' status
+#[tauri::command]
+pub fn process_pending_embeddings(
+    app_handle: tauri::AppHandle,
+    db: State<Database>,
+    shared_db: State<SharedDatabase>,
+) -> Result<i32, String> {
+    // Scope the database access to release the lock before spawning tasks
+    let pending_atoms: Vec<(String, String)> = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+        // Get all atoms with pending status
+        let mut stmt = conn
+            .prepare("SELECT id, content FROM atoms WHERE embedding_status = 'pending'")
+            .map_err(|e| format!("Failed to prepare query: {}", e))?;
+
+        let result = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| format!("Failed to query pending atoms: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to collect pending atoms: {}", e))?;
+        result
+    };
+
+    let count = pending_atoms.len() as i32;
+
+    // Spawn embedding tasks for each pending atom
+    for (atom_id, content) in pending_atoms {
+        spawn_embedding_task(
+            app_handle.clone(),
+            Arc::clone(&shared_db),
+            atom_id,
+            content,
+        );
+    }
+
+    Ok(count)
+}
+
+/// Get the embedding status for an atom
+#[tauri::command]
+pub fn get_embedding_status(db: State<Database>, atom_id: String) -> Result<String, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let status: String = conn
+        .query_row(
+            "SELECT COALESCE(embedding_status, 'pending') FROM atoms WHERE id = ?1",
+            [&atom_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Failed to get embedding status: {}", e))?;
+
+    Ok(status)
 }
 
