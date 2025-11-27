@@ -1,12 +1,12 @@
 # Atomic - Note-Taking Desktop Application
 
 ## Project Overview
-Atomic is a Tauri v2 desktop application for note-taking with a React frontend. It features markdown editing, hierarchical tagging, AI-powered semantic search using local embeddings, automatic tag extraction, wiki article synthesis using OpenRouter LLM, and an interactive canvas view for spatial atom visualization.
+Atomic is a Tauri v2 desktop application for note-taking with a React frontend. It features markdown editing, hierarchical tagging, AI-powered semantic search using embeddings, automatic tag extraction, wiki article synthesis using OpenRouter LLM, and an interactive canvas view for spatial atom visualization.
 
 ## Current Status: Phase 5 Complete
 Phase 5 (Canvas View) is complete with:
 - Interactive, zoomable canvas view as the default view option
-- Atoms spatially arranged using D3-force simulation based on semantic similarity
+- Atoms spatially arranged using D3-force simulation based on semantic similarity (temporarily disabled due to performance issues)
 - Connection lines drawn between atoms sharing tags
 - Zoom/pan handled by react-zoom-pan-pinch library
 - View toggle (Canvas | Grid | List) in main view header
@@ -34,12 +34,6 @@ Phase 3 (Automatic Tag Extraction) features:
 - Tag tree auto-refresh when new tags are created
 - Atoms list auto-refresh when tags are extracted
 
-Phase 2.1 (Real sqlite-lembed Integration) features:
-- Real 384-dimensional embeddings using sqlite-lembed and all-MiniLM-L6-v2 model
-- sqlite-lembed extension loaded at runtime for each database connection
-- Model registered in temp.lembed_models for embedding generation
-- Semantic search uses real embeddings for query and content matching
-
 Phase 2 (Embedding Pipeline) features:
 - Async embedding generation when atoms are created or updated
 - Content chunking algorithm for optimal embedding
@@ -63,8 +57,8 @@ Phase 1 (Foundation + Data Layer) features:
 - **Build Tool**: Vite 6
 - **Styling**: Tailwind CSS v4 (using `@tailwindcss/vite` plugin)
 - **State Management**: Zustand 5 (with persist middleware for UI preferences)
-- **Database**: SQLite with sqlite-vec and sqlite-lembed extensions (via rusqlite)
-- **Embeddings**: Real 384-dimensional vectors via sqlite-lembed + all-MiniLM-L6-v2 GGUF model
+- **Database**: SQLite with sqlite-vec extension (via rusqlite)
+- **Embeddings**: OpenRouter-based embeddings (default model: openai/text-embedding-3-small)
 - **LLM Provider**: OpenRouter API (configurable model, default: openai/gpt-4o-mini for tagging)
 - **HTTP Client**: reqwest (Rust)
 - **Markdown Editor**: CodeMirror 6 (`@uiw/react-codemirror`)
@@ -472,7 +466,7 @@ Content is chunked for optimal embedding generation:
 ### Layout
 - Left Panel: 250px fixed width
 - Main View: Flexible, fills remaining space
-- Right Drawer: 50vw width (min 400px, max 800px), slides from right as overlay
+- Right Drawer: 75vw width, slides from right as overlay
 
 ### Tag Display
 - Tags are collapsed by default in AtomViewer and TagSelector
@@ -525,31 +519,7 @@ Content is chunked for optimal embedding generation:
 - `error: string | null` - Error message
 - Actions: `fetchArticle`, `fetchArticleStatus`, `generateArticle`, `updateArticle`, `deleteArticle`, `clearArticle`, `clearError`
 
-## sqlite-lembed Integration
-
-### How It Works
-1. **Extension Loading**: On database initialization, sqlite-lembed is loaded via `conn.load_extension()` with the `load_extension` feature enabled in rusqlite
-2. **Model Registration**: The all-MiniLM-L6-v2 GGUF model is registered in `temp.lembed_models` for each connection
-3. **Embedding Generation**: Content chunks are embedded using `SELECT lembed('all-MiniLM-L6-v2', ?1)`
-4. **Query Embedding**: Search queries are embedded the same way for semantic matching
-
-### Resource Files
-- `all-MiniLM-L6-v2.q8_0.gguf` - Embedding model (Q8_0 quantization, ~24MB)
-- `lembed0.so` - sqlite-lembed extension binary (Linux x86_64, v0.0.1-alpha.8)
-- `lembed0-aarch64.dylib` - sqlite-lembed extension binary (macOS Apple Silicon, v0.0.1-alpha.8)
-- `lembed0-x86_64.dylib` - sqlite-lembed extension binary (macOS Intel, v0.0.1-alpha.8)
-
-### Platform Support
-The application supports the following platforms with bundled sqlite-lembed extensions:
-- **Linux x86_64**: Uses `lembed0.so`
-- **macOS Apple Silicon (aarch64)**: Uses `lembed0-aarch64.dylib`
-- **macOS Intel (x86_64)**: Uses `lembed0-x86_64.dylib`
-- **Windows**: Not yet supported (no pre-built binaries available)
-
-The `get_lembed_extension_filename()` function in `db.rs` automatically selects the correct extension file based on the target OS and architecture at compile time.
-
 ### Similarity Calculation
 - sqlite-vec returns Euclidean distance (lower = more similar)
 - For normalized vectors, convert to similarity: `1.0 - (distance / 2.0)`
 - Default threshold: 0.7 for related atoms, 0.3 for semantic search, 0.3 for wiki chunk selection
-
