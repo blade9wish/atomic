@@ -57,6 +57,7 @@ export function Modal({
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
+      data-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
     >
       <div className="bg-[#252525] rounded-lg shadow-xl border border-[#3d3d3d] w-full max-w-md mx-4 animate-in fade-in zoom-in-95 duration-200">

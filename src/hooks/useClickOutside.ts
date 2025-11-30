@@ -9,9 +9,20 @@ export function useClickOutside(
     if (!enabled) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        handler();
+      const target = event.target as Node;
+
+      // Ignore if clicking inside the ref
+      if (ref.current && ref.current.contains(target)) {
+        return;
       }
+
+      // Ignore if clicking inside a modal (portaled elements)
+      const targetEl = target as HTMLElement;
+      if (targetEl.closest?.('[data-modal="true"]')) {
+        return;
+      }
+
+      handler();
     };
 
     document.addEventListener('mousedown', handleClickOutside);

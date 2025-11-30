@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { TagChip } from './TagChip';
 import { Input } from '../ui/Input';
 import { useTagsStore, TagWithCount } from '../../stores/tags';
@@ -9,15 +9,100 @@ interface TagSelectorProps {
   onTagsChange: (tags: Tag[]) => void;
 }
 
+// Fuzzy match result with score and match indices
+interface FuzzyMatch {
+  tag: Tag;
+  score: number;
+  matchIndices: number[];
+}
+
+// Fuzzy matching algorithm
+function fuzzyMatch(text: string, query: string): { score: number; matchIndices: number[] } | null {
+  const textLower = text.toLowerCase();
+  const queryLower = query.toLowerCase();
+
+  if (!queryLower) return { score: 1, matchIndices: [] };
+
+  const matchIndices: number[] = [];
+  let queryIndex = 0;
+  let score = 0;
+  let consecutiveMatches = 0;
+  let lastMatchIndex = -1;
+
+  for (let i = 0; i < textLower.length && queryIndex < queryLower.length; i++) {
+    if (textLower[i] === queryLower[queryIndex]) {
+      matchIndices.push(i);
+
+      // Bonus for consecutive matches
+      if (lastMatchIndex === i - 1) {
+        consecutiveMatches++;
+        score += consecutiveMatches * 2;
+      } else {
+        consecutiveMatches = 0;
+      }
+
+      // Bonus for matching at start
+      if (i === 0) score += 10;
+
+      // Bonus for matching after separator (space, -, _)
+      if (i > 0 && /[\s\-_]/.test(text[i - 1])) score += 5;
+
+      // Base score for match
+      score += 1;
+
+      lastMatchIndex = i;
+      queryIndex++;
+    }
+  }
+
+  // All query characters must be found
+  if (queryIndex !== queryLower.length) return null;
+
+  // Bonus for shorter strings (more relevant matches)
+  score += Math.max(0, 20 - text.length);
+
+  // Bonus for exact match
+  if (textLower === queryLower) score += 50;
+
+  // Bonus for starts with query
+  if (textLower.startsWith(queryLower)) score += 25;
+
+  return { score, matchIndices };
+}
+
+// Component to highlight matched characters in fuzzy search results
+function HighlightedText({ text, matchIndices }: { text: string; matchIndices: number[] }) {
+  if (matchIndices.length === 0) {
+    return <>{text}</>;
+  }
+
+  const matchSet = new Set(matchIndices);
+  const parts: JSX.Element[] = [];
+
+  for (let i = 0; i < text.length; i++) {
+    if (matchSet.has(i)) {
+      parts.push(
+        <span key={i} className="text-[#a78bfa] font-semibold">
+          {text[i]}
+        </span>
+      );
+    } else {
+      parts.push(<span key={i}>{text[i]}</span>);
+    }
+  }
+
+  return <>{parts}</>;
+}
+
 export function TagSelector({ selectedTags, onTagsChange }: TagSelectorProps) {
   const { tags, createTag } = useTagsStore();
   const [inputValue, setInputValue] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [showAllSelectedTags, setShowAllSelectedTags] = useState(false);
-  
+
   const MAX_VISIBLE_TAGS = 5;
-  const visibleSelectedTags = showAllSelectedTags 
-    ? selectedTags 
+  const visibleSelectedTags = showAllSelectedTags
+    ? selectedTags
     : selectedTags.slice(0, MAX_VISIBLE_TAGS);
   const hiddenSelectedCount = selectedTags.length - MAX_VISIBLE_TAGS;
 
@@ -40,12 +125,29 @@ export function TagSelector({ selectedTags, onTagsChange }: TagSelectorProps) {
   const allTags = flattenTags(tags);
   const selectedTagIds = new Set(selectedTags.map((t) => t.id));
 
-  // Filter tags based on input
-  const filteredTags = allTags.filter(
-    (tag) =>
-      !selectedTagIds.has(tag.id) &&
-      tag.name.toLowerCase().includes(inputValue.toLowerCase())
-  );
+  // Fuzzy filter and sort tags based on input
+  const filteredTagsWithMatches = useMemo(() => {
+    if (!inputValue.trim()) return [];
+
+    const matches: FuzzyMatch[] = [];
+
+    for (const tag of allTags) {
+      if (selectedTagIds.has(tag.id)) continue;
+
+      const match = fuzzyMatch(tag.name, inputValue);
+      if (match) {
+        matches.push({ tag, score: match.score, matchIndices: match.matchIndices });
+      }
+    }
+
+    // Sort by score descending
+    matches.sort((a, b) => b.score - a.score);
+
+    return matches;
+  }, [allTags, inputValue, selectedTagIds]);
+
+  const filteredTags = filteredTagsWithMatches.map(m => m.tag);
+  const matchIndicesMap = new Map(filteredTagsWithMatches.map(m => [m.tag.id, m.matchIndices]));
 
   const handleAddTag = (tag: Tag) => {
     onTagsChange([...selectedTags, tag]);
@@ -128,15 +230,18 @@ export function TagSelector({ selectedTags, onTagsChange }: TagSelectorProps) {
         {/* Dropdown */}
         {inputValue && (filteredTags.length > 0 || showCreateOption) && (
           <div className="absolute z-10 w-full mt-1 bg-[#2d2d2d] border border-[#3d3d3d] rounded-md shadow-lg max-h-48 overflow-y-auto">
-            {filteredTags.map((tag) => (
-              <button
-                key={tag.id}
-                onClick={() => handleAddTag(tag)}
-                className="w-full px-3 py-2 text-left text-sm text-[#dcddde] hover:bg-[#3d3d3d] transition-colors"
-              >
-                {tag.name}
-              </button>
-            ))}
+            {filteredTags.map((tag) => {
+              const matchIndices = matchIndicesMap.get(tag.id) || [];
+              return (
+                <button
+                  key={tag.id}
+                  onClick={() => handleAddTag(tag)}
+                  className="w-full px-3 py-2 text-left text-sm text-[#dcddde] hover:bg-[#3d3d3d] transition-colors"
+                >
+                  <HighlightedText text={tag.name} matchIndices={matchIndices} />
+                </button>
+              );
+            })}
             {showCreateOption && (
               <button
                 onClick={handleCreateTag}

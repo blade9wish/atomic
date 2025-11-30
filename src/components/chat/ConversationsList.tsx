@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useChatStore, ConversationWithTags } from '../../stores/chat';
 import { ConversationCard } from './ConversationCard';
+import { Modal } from '../ui/Modal';
 
 export function ConversationsList() {
   const {
@@ -11,6 +13,9 @@ export function ConversationsList() {
     openConversation,
     deleteConversation,
   } = useChatStore();
+
+  const [deleteTarget, setDeleteTarget] = useState<ConversationWithTags | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleNewChat = async () => {
     try {
@@ -26,10 +31,22 @@ export function ConversationsList() {
     openConversation(conversation.id);
   };
 
-  const handleDeleteConversation = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteClick = (conversation: ConversationWithTags, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('Delete this conversation?')) {
-      await deleteConversation(id);
+    setDeleteTarget(conversation);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteConversation(deleteTarget.id);
+    } catch (e) {
+      console.error('Failed to delete conversation:', e);
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
     }
   };
 
@@ -87,12 +104,27 @@ export function ConversationsList() {
                 key={conversation.id}
                 conversation={conversation}
                 onClick={() => handleOpenConversation(conversation)}
-                onDelete={(e) => handleDeleteConversation(conversation.id, e)}
+                onDelete={(e) => handleDeleteClick(conversation, e)}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete Conversation"
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
+        confirmVariant="danger"
+        onConfirm={handleConfirmDelete}
+      >
+        <p>
+          Are you sure you want to delete "{deleteTarget?.title || 'New Conversation'}"?
+          This will remove all messages and cannot be undone.
+        </p>
+      </Modal>
     </div>
   );
 }
