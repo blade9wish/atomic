@@ -36,6 +36,7 @@ export function RightDrawer() {
   );
 
   // Track drawer open/close timing
+  const closeStartRef = useRef<number | null>(null);
   useEffect(() => {
     if (isOpen) {
       openTimeRef.current = performance.now();
@@ -45,6 +46,16 @@ export function RightDrawer() {
       openTimeRef.current = null;
     }
   }, [isOpen, mode, atomId]);
+
+  // Track when isOpen changes to false (close initiated)
+  useEffect(() => {
+    if (!isOpen && closeStartRef.current === null && drawerState.mode) {
+      closeStartRef.current = performance.now();
+      perfLog('Close INITIATED - starting render cycle');
+    } else if (isOpen) {
+      closeStartRef.current = null;
+    }
+  });
 
   // Fetch atom from database when viewing
   useEffect(() => {
@@ -111,10 +122,21 @@ export function RightDrawer() {
 
     switch (mode) {
       case 'editor':
+        if (!isOpen) {
+          contentType = 'editor-closing';
+          result = null;
+          break;
+        }
         contentType = 'editor';
         result = <AtomEditor atomId={atomId} onClose={closeDrawer} />;
         break;
       case 'viewer':
+        // Don't render heavy content when drawer is closing - allows smooth animation
+        if (!isOpen) {
+          contentType = 'viewer-closing';
+          result = null;
+          break;
+        }
         if (isLoadingAtom) {
           contentType = 'viewer-loading';
           result = (
@@ -137,6 +159,11 @@ export function RightDrawer() {
         result = <AtomViewer atom={atom} onClose={closeDrawer} onEdit={handleEdit} />;
         break;
       case 'wiki':
+        if (!isOpen) {
+          contentType = 'wiki-closing';
+          result = null;
+          break;
+        }
         if (!tagId || !tagName) {
           contentType = 'wiki-no-tag';
           result = (

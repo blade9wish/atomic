@@ -68,8 +68,9 @@ export function MainView() {
   };
 
   const handleOpenChat = () => {
-    // Open chat with current tag filter if one is selected
-    openChatDrawer(selectedTagId ?? undefined);
+    // Open chat list without pre-selecting a tag
+    // (Tag-specific chat is opened via the chat icon next to each tag)
+    openChatDrawer();
   };
 
   return (

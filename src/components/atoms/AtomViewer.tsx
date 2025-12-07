@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useLayoutEffect, ReactNode, useRef } from 'react';
+import { useState, useEffect, useCallback, useLayoutEffect, ReactNode, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -14,6 +14,7 @@ import { useTagsStore } from '../../stores/tags';
 import { useUIStore } from '../../stores/ui';
 import { useContentSearch } from '../../hooks';
 import { formatDate } from '../../lib/date';
+import { chunkMarkdown } from '../../lib/markdown';
 
 // Benchmarking helper
 const PERF_DEBUG = true;
@@ -32,6 +33,12 @@ interface AtomViewerProps {
   onEdit: () => void;
 }
 
+// Progressive rendering configuration
+const CHUNK_SIZE = 8000; // ~8KB per chunk
+const INITIAL_CHUNKS = 1; // Render 1 chunk immediately
+const CHUNKS_PER_BATCH = 2; // Render 2 chunks at a time to reduce re-renders
+const CHUNK_DELAY = 32; // ~2 frames between batches
+
 export function AtomViewer({ atom, onClose, onEdit }: AtomViewerProps) {
   const mountTimeRef = useRef(performance.now());
   const renderCountRef = useRef(0);
@@ -42,6 +49,48 @@ export function AtomViewer({ atom, onClose, onEdit }: AtomViewerProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [metadataExpanded, setMetadataExpanded] = useState(false);
+
+  // Progressive rendering: chunk the content
+  const chunks = useMemo(() => {
+    const result = chunkMarkdown(atom.content, CHUNK_SIZE);
+    perfLog(`Content chunked: ${result.length} chunks from ${atom.content.length} chars`);
+    return result;
+  }, [atom.content]);
+
+  // Track how many chunks are currently rendered
+  const [renderedChunkCount, setRenderedChunkCount] = useState(INITIAL_CHUNKS);
+  const isFullyRendered = renderedChunkCount >= chunks.length;
+
+  // Progressive loading: render more chunks over time
+  useEffect(() => {
+    if (isFullyRendered) return;
+
+    const loadNextBatch = () => {
+      setRenderedChunkCount(prev => {
+        const next = Math.min(prev + CHUNKS_PER_BATCH, chunks.length);
+        if (next < chunks.length) {
+          perfLog(`Rendered chunks ${prev + 1}-${next}/${chunks.length}`);
+        } else {
+          perfLog(`All ${chunks.length} chunks rendered`);
+        }
+        return next;
+      });
+    };
+
+    // Use requestIdleCallback if available, otherwise setTimeout
+    if ('requestIdleCallback' in window) {
+      const id = requestIdleCallback(loadNextBatch, { timeout: 100 });
+      return () => cancelIdleCallback(id);
+    } else {
+      const id = setTimeout(loadNextBatch, CHUNK_DELAY);
+      return () => clearTimeout(id);
+    }
+  }, [renderedChunkCount, chunks.length, isFullyRendered]);
+
+  // Reset chunk count when atom changes
+  useEffect(() => {
+    setRenderedChunkCount(INITIAL_CHUNKS);
+  }, [atom.id]);
 
   // Track mount/unmount and render count
   useEffect(() => {
@@ -62,17 +111,20 @@ export function AtomViewer({ atom, onClose, onEdit }: AtomViewerProps) {
   const renderStartRef = useRef<number>(performance.now());
   const articleRef = useRef<HTMLElement | null>(null);
 
-  // This runs synchronously after DOM mutations, before browser paint
+  // Preserve scroll position when new chunks are added
   useLayoutEffect(() => {
+    // This runs synchronously after DOM mutations, before browser paint
+    // By doing nothing special here, we let the browser maintain scroll position naturally
+    // The key is that we're adding content at the END, not the beginning
     if (articleRef.current) {
       const domNodes = articleRef.current.querySelectorAll('*').length;
       const images = articleRef.current.querySelectorAll('img').length;
       perfLog(`DOM ready (render #${renderCountRef.current})`, renderStartRef.current);
-      perfLog(`  DOM nodes: ${domNodes}, Images: ${images}`);
+      perfLog(`  DOM nodes: ${domNodes}, Images: ${images}, Chunks: ${renderedChunkCount}/${chunks.length}`);
     }
     // Reset for next render
     renderStartRef.current = performance.now();
-  });
+  }, [renderedChunkCount, chunks.length]);
 
   // Content search
   const {
@@ -111,6 +163,79 @@ export function AtomViewer({ atom, onClose, onEdit }: AtomViewerProps) {
     },
     [isSearchOpen, searchQuery, processChildren]
   );
+
+  // Memoize markdown components to prevent re-renders from resetting image loading states
+  const markdownComponents = useMemo(() => ({
+    p: ({ children }: { children?: ReactNode }) => (
+      <p>{wrapWithHighlight(children)}</p>
+    ),
+    li: ({ children }: { children?: ReactNode }) => (
+      <li>{wrapWithHighlight(children)}</li>
+    ),
+    td: ({ children }: { children?: ReactNode }) => (
+      <td>{wrapWithHighlight(children)}</td>
+    ),
+    th: ({ children }: { children?: ReactNode }) => (
+      <th>{wrapWithHighlight(children)}</th>
+    ),
+    strong: ({ children }: { children?: ReactNode }) => (
+      <strong>{wrapWithHighlight(children)}</strong>
+    ),
+    em: ({ children }: { children?: ReactNode }) => (
+      <em>{wrapWithHighlight(children)}</em>
+    ),
+    del: ({ children }: { children?: ReactNode }) => (
+      <del>{wrapWithHighlight(children)}</del>
+    ),
+    h1: ({ children }: { children?: ReactNode }) => (
+      <h1>{wrapWithHighlight(children)}</h1>
+    ),
+    h2: ({ children }: { children?: ReactNode }) => (
+      <h2>{wrapWithHighlight(children)}</h2>
+    ),
+    h3: ({ children }: { children?: ReactNode }) => (
+      <h3>{wrapWithHighlight(children)}</h3>
+    ),
+    h4: ({ children }: { children?: ReactNode }) => (
+      <h4>{wrapWithHighlight(children)}</h4>
+    ),
+    h5: ({ children }: { children?: ReactNode }) => (
+      <h5>{wrapWithHighlight(children)}</h5>
+    ),
+    h6: ({ children }: { children?: ReactNode }) => (
+      <h6>{wrapWithHighlight(children)}</h6>
+    ),
+    blockquote: ({ children }: { children?: ReactNode }) => (
+      <blockquote>{wrapWithHighlight(children)}</blockquote>
+    ),
+    code: ({ className, children }: { className?: string; children?: ReactNode }) => {
+      const isBlock = className?.startsWith('language-');
+      if (isBlock) {
+        return <code className={className}>{wrapWithHighlight(children)}</code>;
+      }
+      return <code>{wrapWithHighlight(children)}</code>;
+    },
+    pre: ({ children }: { children?: ReactNode }) => (
+      <pre>{children}</pre>
+    ),
+    a: ({ href, children }: { href?: string; children?: ReactNode }) => (
+      <a
+        href={href}
+        onClick={(e) => {
+          e.preventDefault();
+          if (href) {
+            openUrl(href).catch(err => console.error('Failed to open URL:', err));
+          }
+        }}
+        className="cursor-pointer"
+      >
+        {wrapWithHighlight(children)}
+      </a>
+    ),
+    img: ({ src, alt }: { src?: string; alt?: string }) => (
+      <MarkdownImage src={src} alt={alt} />
+    ),
+  }), [wrapWithHighlight]);
 
   const handleViewNeighborhood = () => {
     closeDrawer();
@@ -219,83 +344,26 @@ export function AtomViewer({ atom, onClose, onEdit }: AtomViewerProps) {
           ref={articleRef}
           className="prose prose-invert prose-sm max-w-none prose-headings:text-[var(--color-text-primary)] prose-p:text-[var(--color-text-primary)] prose-a:text-[var(--color-accent)] prose-strong:text-[var(--color-text-primary)] prose-code:text-[var(--color-accent-light)] prose-code:bg-[var(--color-bg-card)] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-[var(--color-bg-card)] prose-pre:border prose-pre:border-[var(--color-border)] prose-blockquote:border-l-[var(--color-accent)] prose-blockquote:text-[var(--color-text-secondary)] prose-li:text-[var(--color-text-primary)] prose-hr:border-[var(--color-border)]"
         >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              p: ({ children }: { children?: ReactNode }) => (
-                <p>{wrapWithHighlight(children)}</p>
-              ),
-              li: ({ children }: { children?: ReactNode }) => (
-                <li>{wrapWithHighlight(children)}</li>
-              ),
-              td: ({ children }: { children?: ReactNode }) => (
-                <td>{wrapWithHighlight(children)}</td>
-              ),
-              th: ({ children }: { children?: ReactNode }) => (
-                <th>{wrapWithHighlight(children)}</th>
-              ),
-              strong: ({ children }: { children?: ReactNode }) => (
-                <strong>{wrapWithHighlight(children)}</strong>
-              ),
-              em: ({ children }: { children?: ReactNode }) => (
-                <em>{wrapWithHighlight(children)}</em>
-              ),
-              del: ({ children }: { children?: ReactNode }) => (
-                <del>{wrapWithHighlight(children)}</del>
-              ),
-              h1: ({ children }: { children?: ReactNode }) => (
-                <h1>{wrapWithHighlight(children)}</h1>
-              ),
-              h2: ({ children }: { children?: ReactNode }) => (
-                <h2>{wrapWithHighlight(children)}</h2>
-              ),
-              h3: ({ children }: { children?: ReactNode }) => (
-                <h3>{wrapWithHighlight(children)}</h3>
-              ),
-              h4: ({ children }: { children?: ReactNode }) => (
-                <h4>{wrapWithHighlight(children)}</h4>
-              ),
-              h5: ({ children }: { children?: ReactNode }) => (
-                <h5>{wrapWithHighlight(children)}</h5>
-              ),
-              h6: ({ children }: { children?: ReactNode }) => (
-                <h6>{wrapWithHighlight(children)}</h6>
-              ),
-              blockquote: ({ children }: { children?: ReactNode }) => (
-                <blockquote>{wrapWithHighlight(children)}</blockquote>
-              ),
-              code: ({ className, children }: { className?: string; children?: ReactNode }) => {
-                // Check if it's a code block (has language class) or inline code
-                const isBlock = className?.startsWith('language-');
-                if (isBlock) {
-                  return <code className={className}>{wrapWithHighlight(children)}</code>;
-                }
-                return <code>{wrapWithHighlight(children)}</code>;
-              },
-              pre: ({ children }: { children?: ReactNode }) => (
-                <pre>{children}</pre>
-              ),
-              a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-                <a
-                  href={href}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (href) {
-                      openUrl(href).catch(err => console.error('Failed to open URL:', err));
-                    }
-                  }}
-                  className="cursor-pointer"
-                >
-                  {wrapWithHighlight(children)}
-                </a>
-              ),
-              img: ({ src, alt }: { src?: string; alt?: string }) => (
-                <MarkdownImage src={src} alt={alt} />
-              ),
-            }}
-          >
-            {atom.content}
-          </ReactMarkdown>
+          {/* Render chunks progressively */}
+          {chunks.slice(0, renderedChunkCount).map((chunk, index) => (
+            <ReactMarkdown
+              key={index}
+              remarkPlugins={[remarkGfm]}
+              components={markdownComponents}
+            >
+              {chunk}
+            </ReactMarkdown>
+          ))}
+
+          {/* Loading indicator for remaining chunks - fixed height to prevent layout shift */}
+          <div className="h-8">
+            {!isFullyRendered && (
+              <div className="flex items-center gap-2 text-[var(--color-text-tertiary)]">
+                <div className="w-4 h-4 border-2 border-[var(--color-text-tertiary)] border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm">Loading...</span>
+              </div>
+            )}
+          </div>
         </article>
       </div>
 
