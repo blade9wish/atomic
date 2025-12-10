@@ -731,13 +731,11 @@ pub async fn process_embedding_batch(
     }
 }
 
-/// Convert distance to similarity score (0-1 scale)
-/// For normalized vectors using L2 distance, max distance is 2.0 (opposite vectors)
+/// Convert L2 distance to cosine similarity for normalized vectors
+/// Formula: cosine_similarity = 1 - (L2_distance² / 2)
+/// This derives from: L2² = 2(1 - cos(θ)) for unit vectors
 pub fn distance_to_similarity(distance: f32) -> f32 {
-    // For L2 distance on normalized vectors:
-    // distance = 0 means identical vectors (similarity = 1)
-    // distance = 2 means opposite vectors (similarity = 0)
-    (1.0 - (distance / 2.0)).max(0.0).min(1.0)
+    (1.0 - (distance * distance / 2.0)).clamp(-1.0, 1.0)
 }
 
 /// Compute semantic edges for an atom after embedding generation

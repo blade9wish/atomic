@@ -405,9 +405,9 @@ fn get_relevant_chunks_for_article_sync(
     Ok(results)
 }
 
-/// Convert distance to similarity score (0-1 scale)
+/// Convert L2 distance to cosine similarity for normalized vectors
 fn distance_to_similarity(distance: f32) -> f32 {
-    (1.0 - (distance / 2.0)).max(0.0).min(1.0)
+    (1.0 - (distance * distance / 2.0)).clamp(-1.0, 1.0)
 }
 
 /// Call LLM provider for wiki generation

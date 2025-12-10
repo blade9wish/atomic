@@ -8,6 +8,7 @@ mod db;
 mod embedding;
 mod extraction;
 mod http_server;
+mod mcp;
 mod models;
 mod providers;
 mod settings;

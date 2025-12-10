@@ -30,6 +30,11 @@ actix-web = "4.9"
 actix-cors = "0.7"
 async-trait = "0.1"
 
+# MCP Server
+rmcp = { version = "0.10", features = ["server", "macros", "transport-streamable-http-server-session"] }
+rmcp-actix-web = "0.8"
+schemars = "1.0"
+
 [profile.release]
 opt-level = "z"        # Optimize for size
 lto = true             # Enable Link Time Optimization
