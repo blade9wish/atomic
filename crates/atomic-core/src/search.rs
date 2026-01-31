@@ -230,7 +230,7 @@ async fn search_keyword_chunks(
 
     let mut fts_stmt = conn
         .prepare(
-            "SELECT chunk_id, atom_id, content, chunk_index, bm25(atom_chunks_fts) as score
+            "SELECT id, atom_id, content, chunk_index, bm25(atom_chunks_fts) as score
              FROM atom_chunks_fts
              WHERE atom_chunks_fts MATCH ?1
              ORDER BY bm25(atom_chunks_fts)
@@ -372,7 +372,7 @@ async fn search_hybrid_chunks(
 
         let mut fts_stmt = conn
             .prepare(
-                "SELECT chunk_id, atom_id, content, chunk_index
+                "SELECT id, atom_id, content, chunk_index
                  FROM atom_chunks_fts
                  WHERE atom_chunks_fts MATCH ?1
                  ORDER BY bm25(atom_chunks_fts)

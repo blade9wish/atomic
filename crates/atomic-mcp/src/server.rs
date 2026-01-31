@@ -69,7 +69,7 @@ impl AtomicMcpServer {
             .prepare(
                 "SELECT DISTINCT ac.atom_id, a.content, ac.content as chunk_content
                  FROM atom_chunks_fts fts
-                 JOIN atom_chunks ac ON fts.chunk_id = ac.id
+                 JOIN atom_chunks ac ON fts.id = ac.id
                  JOIN atoms a ON ac.atom_id = a.id
                  WHERE atom_chunks_fts MATCH ?1
                  ORDER BY bm25(atom_chunks_fts)

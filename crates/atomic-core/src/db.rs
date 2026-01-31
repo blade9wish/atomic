@@ -177,14 +177,15 @@ impl Database {
         }
 
         // FTS5 table for keyword search (external content backed by atom_chunks).
-        // Must declare all atom_chunks columns so positional mapping is correct:
+        // Column names MUST match atom_chunks columns (FTS5 uses names during rebuild).
+        // Positional mapping to atom_chunks for external content reads:
         //   FTS5 col 0 (id)          -> atom_chunks col 0 (id)
         //   FTS5 col 1 (atom_id)     -> atom_chunks col 1 (atom_id)
         //   FTS5 col 2 (chunk_index) -> atom_chunks col 2 (chunk_index)
         //   FTS5 col 3 (content)     -> atom_chunks col 3 (content)
         //
-        // Migration: d9e8f91 introduced a broken 2-column schema (chunk_id, content)
-        // that caused incorrect positional mapping. Detect and fix it.
+        // Correct schema requires: content='atom_chunks' AND all 4 column names.
+        // Recreate if missing, standalone, or has wrong column names.
         let fts_sql: String = conn
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='atom_chunks_fts'",
@@ -193,22 +194,11 @@ impl Database {
             )
             .unwrap_or_default();
 
-        if fts_sql.is_empty() {
-            // Table doesn't exist — create it
-            conn.execute_batch(
-                r#"
-                CREATE VIRTUAL TABLE atom_chunks_fts USING fts5(
-                    id,
-                    atom_id,
-                    chunk_index,
-                    content,
-                    content='atom_chunks',
-                    content_rowid='rowid'
-                );
-                "#,
-            )?;
-        } else if !fts_sql.contains("atom_id") {
-            // Old 2-column schema — drop and recreate with correct columns
+        let has_correct_fts = fts_sql.contains("content='atom_chunks'")
+            && fts_sql.contains("atom_id")
+            && fts_sql.contains("chunk_index");
+
+        if !has_correct_fts {
             conn.execute_batch("DROP TABLE IF EXISTS atom_chunks_fts")?;
             conn.execute_batch(
                 r#"
