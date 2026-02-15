@@ -162,7 +162,7 @@ async fn run_server(
             ))
         }))
         .session_manager(Arc::new(LocalSessionManager::default()))
-        .stateful_mode(false)
+        .stateful_mode(true)
         .sse_keep_alive(Duration::from_secs(30))
         .build();
 
@@ -222,6 +222,10 @@ async fn run_server(
             )
             .route(
                 "/.well-known/oauth-protected-resource",
+                web::get().to(routes::oauth::resource_metadata),
+            )
+            .route(
+                "/.well-known/oauth-protected-resource/mcp",
                 web::get().to(routes::oauth::resource_metadata),
             )
             // OAuth flow (public, no auth)
