@@ -2266,6 +2266,7 @@ fn strip_images_from_text(text: &str) -> String {
 }
 
 /// Simple markdown stripping for snippets (server-side).
+/// Preserves newlines between lines so the frontend can split title from body.
 fn strip_markdown_simple(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     for line in text.lines() {
@@ -2282,7 +2283,7 @@ fn strip_markdown_simple(text: &str) -> String {
         };
         if !stripped.is_empty() {
             if !result.is_empty() {
-                result.push(' ');
+                result.push('\n');
             }
             result.push_str(stripped);
         }

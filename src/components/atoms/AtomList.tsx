@@ -23,7 +23,7 @@ export const AtomList = memo(function AtomList({
   const virtualizer = useVirtualizer({
     count: atoms.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 76,
+    estimateSize: () => 72,
     overscan: 10,
     gap: 8,
   });

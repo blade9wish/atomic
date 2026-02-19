@@ -116,10 +116,10 @@ interface AtomsStore {
 
 /** Convert an AtomWithTags (full content) to AtomSummary shape for the store */
 function toSummary(atom: AtomWithTags): AtomSummary {
-  // Extract first ~200 chars as snippet, stripping basic markdown
+  // Extract first ~250 chars, stripping basic markdown but preserving newlines for title/snippet split
   const lines = atom.content.split('\n').filter(l => l.trim());
-  const plain = lines.map(l => l.replace(/^#{1,6}\s/, '').replace(/\*\*/g, '')).join(' ');
-  const snippet = plain.length > 200 ? plain.slice(0, 200).trim() + '...' : plain;
+  const plain = lines.map(l => l.replace(/^#{1,6}\s/, '').replace(/\*\*/g, '')).join('\n');
+  const snippet = plain.length > 250 ? plain.slice(0, 250).trim() + '...' : plain;
   return {
     id: atom.id,
     snippet,

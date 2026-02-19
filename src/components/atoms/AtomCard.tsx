@@ -96,9 +96,10 @@ export const AtomCard = memo(function AtomCard({
 
   // Use snippet for summaries, extractTitleAndSnippet for full atoms (search results)
   const hasContent = 'content' in atom;
+  const snippetLen = viewMode === 'grid' ? 300 : 200;
   const { title, snippet } = hasContent
-    ? extractTitleAndSnippet((atom as any).content, 120)
-    : extractTitleAndSnippet((atom as AtomSummary).snippet, 120);
+    ? extractTitleAndSnippet((atom as any).content, snippetLen)
+    : extractTitleAndSnippet((atom as AtomSummary).snippet, snippetLen);
 
   const maxVisibleTags = viewMode === 'grid' ? 2 : 3;
   const visibleTags = atom.tags.slice(0, maxVisibleTags);
@@ -108,7 +109,7 @@ export const AtomCard = memo(function AtomCard({
     return (
       <div
         onClick={handleClick}
-        className="relative flex items-center gap-4 p-4 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-lg cursor-pointer hover:border-[var(--color-border-hover)] hover:bg-[var(--color-bg-hover)] transition-all duration-150"
+        className="relative flex items-center gap-3 px-3 py-2.5 bg-[var(--color-bg-card)] border border-[var(--color-border)] rounded-lg cursor-pointer hover:border-[var(--color-border-hover)] hover:bg-[var(--color-bg-hover)] transition-all duration-150"
       >
         <ProcessingStatusIndicator
           embeddingStatus={atom.embedding_status}
@@ -116,20 +117,27 @@ export const AtomCard = memo(function AtomCard({
           onRetry={handleRetry}
         />
         <div className="flex-1 min-w-0">
-          <p
-            className={`text-sm font-medium line-clamp-1 ${
-              matchingChunkContent ? 'text-[var(--color-accent-light)]' : 'text-[var(--color-text-primary)]'
-            }`}
-          >
-            {title || 'Untitled'}
-          </p>
+          <div className="flex items-baseline gap-2">
+            <span
+              className={`text-sm font-medium shrink-0 ${
+                matchingChunkContent ? 'text-[var(--color-accent-light)]' : 'text-[var(--color-text-primary)]'
+              }`}
+            >
+              {title || 'Untitled'}
+            </span>
+            {snippet && (
+              <span className="text-xs text-[var(--color-text-tertiary)] truncate">
+                {snippet}
+              </span>
+            )}
+          </div>
           {atom.tags.length > 0 && (
-            <div className="flex items-center gap-1.5 mt-2">
+            <div className="flex items-center gap-1.5 mt-1">
               {visibleTags.map((tag) => (
                 <TagChip key={tag.id} name={tag.name} size="sm" />
               ))}
               {remainingTags > 0 && (
-                <span className="text-xs text-[var(--color-text-tertiary)]">+{remainingTags} more</span>
+                <span className="text-xs text-[var(--color-text-tertiary)]">+{remainingTags}</span>
               )}
             </div>
           )}
@@ -151,16 +159,16 @@ export const AtomCard = memo(function AtomCard({
         taggingStatus={atom.tagging_status}
         onRetry={handleRetry}
       />
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <p
-          className={`text-sm font-medium line-clamp-2 ${
+          className={`text-sm font-medium line-clamp-1 ${
             matchingChunkContent ? 'text-[var(--color-accent-light)]' : 'text-[var(--color-text-primary)]'
           }`}
         >
           {title || 'Untitled'}
         </p>
         {snippet && (
-          <p className="text-sm text-[var(--color-text-secondary)] line-clamp-2 mt-1 leading-relaxed">
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed line-clamp-4">
             {snippet}
           </p>
         )}
