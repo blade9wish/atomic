@@ -19,6 +19,7 @@ Atomic stores knowledge as **atoms** — markdown notes that are automatically c
 - **Chat** — Agentic RAG interface that searches your knowledge base during conversation
 - **Auto-Tagging** — LLM-powered tag extraction organized into hierarchical categories
 - **Multiple AI Providers** — OpenRouter (cloud) or Ollama (local) for embeddings and LLMs
+- **RSS Feeds** — Subscribe to feeds and automatically sync new articles as atoms
 - **Browser Extension** — Capture web content directly into Atomic
 - **MCP Server** — Expose your knowledge base to Claude and other AI tools
 - **Multi-Database** — Multiple knowledge bases with a shared registry
