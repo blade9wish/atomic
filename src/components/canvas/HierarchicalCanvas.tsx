@@ -115,7 +115,7 @@ export function HierarchicalCanvas() {
           id: node.id,
           title: node.label,
           snippet: '',
-          tags: [],
+          tags: (node.dominant_tags || []).map(name => ({ id: name, name, parent_id: null, created_at: '' })),
           source_url: null,
           source: null,
           published_at: null,
@@ -181,7 +181,7 @@ export function HierarchicalCanvas() {
                     className="absolute top-0 left-0 pointer-events-none"
                     width={dimensions.width}
                     height={dimensions.height}
-                    style={{ zIndex: 0 }}
+                    style={{ zIndex: 0, overflow: 'visible' }}
                   >
                     {edges.map((edge) => {
                       const src = nodePositionMap.get(edge.source_id);
@@ -197,7 +197,6 @@ export function HierarchicalCanvas() {
                           stroke="var(--color-accent)"
                           strokeWidth={1 + edge.weight}
                           strokeOpacity={0.15 + edge.weight * 0.2}
-                          strokeDasharray={edge.weight < 0.5 ? '4,3' : undefined}
                         />
                       );
                     })}
@@ -234,7 +233,7 @@ export function HierarchicalCanvas() {
                 </TransformComponent>
 
                 {/* Zoom controls */}
-                <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
+                <div className="absolute bottom-4 left-4 flex flex-col gap-1 z-10">
                   <button
                     onClick={() => zoomIn()}
                     className="w-8 h-8 rounded-md bg-[var(--color-bg-card)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] flex items-center justify-center transition-colors"
