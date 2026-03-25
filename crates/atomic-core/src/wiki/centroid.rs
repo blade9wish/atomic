@@ -14,7 +14,7 @@ use rusqlite::Connection;
 
 use super::{
     call_llm_for_wiki, extract_citations, batch_fetch_chunk_details, count_atoms_with_tags,
-    get_tag_hierarchy, synthesize_article, WikiStrategyContext, MAX_WIKI_SOURCE_TOKENS,
+    get_tag_hierarchy, synthesize_article, WikiStrategyContext,
     WIKI_UPDATE_SYSTEM_PROMPT,
 };
 
@@ -39,8 +39,9 @@ pub struct WikiUpdateInput {
 pub(crate) async fn generate(
     ctx: &WikiStrategyContext,
 ) -> Result<WikiArticleWithCitations, String> {
-    eprintln!("[wiki/centroid] Preparing sources (centroid similarity)...");
-    let input = prepare_wiki_generation(&ctx.db, &ctx.provider_config, &ctx.tag_id, &ctx.tag_name).await?;
+    let max_tokens = ctx.max_source_tokens();
+    eprintln!("[wiki/centroid] Preparing sources (centroid similarity, budget {} tokens)...", max_tokens);
+    let input = prepare_wiki_generation(&ctx.db, &ctx.provider_config, &ctx.tag_id, &ctx.tag_name, max_tokens).await?;
     eprintln!("[wiki/centroid] Found {} chunks from {} atoms", input.chunks.len(), input.atom_count);
 
     eprintln!("[wiki/centroid] Calling LLM...");
@@ -60,6 +61,7 @@ pub(crate) async fn update(
     ctx: &WikiStrategyContext,
     existing: &WikiArticleWithCitations,
 ) -> Result<Option<WikiArticleWithCitations>, String> {
+    let max_tokens = ctx.max_source_tokens();
     let update_input = {
         let conn = ctx.db.conn.lock().map_err(|e| e.to_string())?;
         prepare_wiki_update(
@@ -68,6 +70,7 @@ pub(crate) async fn update(
             &ctx.tag_name,
             &existing.article,
             &existing.citations,
+            max_tokens,
         )?
     };
 
@@ -96,6 +99,7 @@ async fn prepare_wiki_generation(
     _provider_config: &ProviderConfig,
     tag_id: &str,
     tag_name: &str,
+    max_source_tokens: usize,
 ) -> Result<WikiGenerationInput, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
@@ -135,11 +139,11 @@ async fn prepare_wiki_generation(
 
     let chunks = if let Some(ref centroid) = centroid_blob {
         // Ranked path: query vec_chunks with centroid, filter to scoped atoms, fill token budget
-        select_chunks_by_centroid(&conn, centroid, &scoped_atom_ids)?
+        select_chunks_by_centroid(&conn, centroid, &scoped_atom_ids, max_source_tokens)?
     } else {
         // Fallback: no centroid yet (e.g. embeddings haven't run), fetch by insertion order
         eprintln!("[wiki/centroid] No centroid for tag {}, falling back to unranked chunk selection", tag_id);
-        select_chunks_unranked(&conn, &placeholders, &all_tag_ids)?
+        select_chunks_unranked(&conn, &placeholders, &all_tag_ids, max_source_tokens)?
     };
 
     if chunks.is_empty() {
@@ -161,6 +165,7 @@ fn select_chunks_by_centroid(
     conn: &Connection,
     centroid_blob: &[u8],
     scoped_atom_ids: &std::collections::HashSet<String>,
+    max_source_tokens: usize,
 ) -> Result<Vec<ChunkWithContext>, String> {
     // Fetch more than we need from vec_chunks since we'll filter by scope.
     // Over-fetch by 3x to account for chunks outside the tag hierarchy.
@@ -196,7 +201,7 @@ fn select_chunks_by_centroid(
                 continue;
             }
             let tokens = count_tokens(content);
-            if total_tokens + tokens > MAX_WIKI_SOURCE_TOKENS && !chunks.is_empty() {
+            if total_tokens + tokens > max_source_tokens && !chunks.is_empty() {
                 break;
             }
             total_tokens += tokens;
@@ -222,6 +227,7 @@ fn select_chunks_unranked(
     conn: &Connection,
     placeholders: &str,
     all_tag_ids: &[String],
+    max_source_tokens: usize,
 ) -> Result<Vec<ChunkWithContext>, String> {
     let query = format!(
         "SELECT DISTINCT ac.atom_id, ac.chunk_index, ac.content
@@ -244,7 +250,7 @@ fn select_chunks_unranked(
     while let Some(row) = rows.next().map_err(|e| format!("Failed to read row: {}", e))? {
         let content: String = row.get(2).map_err(|e| format!("Failed to get content: {}", e))?;
         let tokens = count_tokens(&content);
-        if total_tokens + tokens > MAX_WIKI_SOURCE_TOKENS && !chunks.is_empty() {
+        if total_tokens + tokens > max_source_tokens && !chunks.is_empty() {
             break;
         }
         total_tokens += tokens;
@@ -293,6 +299,7 @@ fn prepare_wiki_update(
     _tag_name: &str,
     existing_article: &WikiArticle,
     existing_citations: &[WikiCitation],
+    max_source_tokens: usize,
 ) -> Result<Option<WikiUpdateInput>, String> {
     let last_update = &existing_article.updated_at;
 
@@ -327,11 +334,11 @@ fn prepare_wiki_update(
         .ok();
 
     let new_chunks = if let Some(ref centroid) = centroid_blob {
-        select_chunks_by_centroid(conn, centroid, &new_atom_id_set)?
+        select_chunks_by_centroid(conn, centroid, &new_atom_id_set, max_source_tokens)?
     } else {
         // Fallback: fetch by insertion order with token budget
         eprintln!("[wiki/centroid] No centroid for tag {}, falling back to unranked update chunk selection", tag_id);
-        select_new_chunks_unranked(conn, &new_atom_id_set)?
+        select_new_chunks_unranked(conn, &new_atom_id_set, max_source_tokens)?
     };
 
     if new_chunks.is_empty() {
@@ -364,6 +371,7 @@ fn prepare_wiki_update(
 fn select_new_chunks_unranked(
     conn: &Connection,
     new_atom_ids: &std::collections::HashSet<String>,
+    max_source_tokens: usize,
 ) -> Result<Vec<ChunkWithContext>, String> {
     if new_atom_ids.is_empty() {
         return Ok(Vec::new());
@@ -388,7 +396,7 @@ fn select_new_chunks_unranked(
     while let Some(row) = rows.next().map_err(|e| format!("Failed to read row: {}", e))? {
         let content: String = row.get(2).map_err(|e| format!("Failed to get content: {}", e))?;
         let tokens = count_tokens(&content);
-        if total_tokens + tokens > MAX_WIKI_SOURCE_TOKENS && !chunks.is_empty() {
+        if total_tokens + tokens > max_source_tokens && !chunks.is_empty() {
             break;
         }
         total_tokens += tokens;

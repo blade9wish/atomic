@@ -242,6 +242,23 @@ export function AIProviderStep({ state, dispatch }: AIProviderStepProps) {
                   placeholder="Select LLM model..."
                 />
               </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs text-[var(--color-text-secondary)]">Context Length</label>
+                <CustomSelect
+                  value={state.ollamaContextLength}
+                  onChange={(v) => dispatch({ type: 'SET_OLLAMA_CONTEXT_LENGTH', value: v })}
+                  options={[
+                    { value: '2048', label: '2K' },
+                    { value: '4096', label: '4K' },
+                    { value: '8192', label: '8K' },
+                    { value: '16384', label: '16K' },
+                    { value: '32768', label: '32K' },
+                    { value: '65536', label: '64K' },
+                    { value: '131072', label: '128K' },
+                  ]}
+                />
+              </div>
             </div>
           )}
         </>

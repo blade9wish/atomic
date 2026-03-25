@@ -7,6 +7,7 @@
 use crate::chat;
 use crate::db::Database;
 use crate::models::{ChatCitation, ChatMessage, ChatMessageWithContext, ChatToolCall, SemanticSearchResult};
+use crate::chunking::count_tokens;
 use crate::providers::traits::LlmConfig;
 use crate::providers::types::{GenerationParams, Message, StreamDelta, ToolDefinition};
 use crate::providers::{create_streaming_llm_provider, ProviderConfig, ProviderType};
@@ -150,6 +151,61 @@ When citing sources:
     )
 }
 
+// ==================== Context Window Management ====================
+
+/// Truncate message history to fit within the provider's context window.
+/// Keeps the system prompt (first message) and the most recent user message,
+/// then includes as many recent messages as fit in the remaining budget.
+/// Reserves ~30% of context for the assistant's response and tool results.
+fn truncate_messages_to_context(messages: Vec<Message>, context_length: Option<usize>) -> Vec<Message> {
+    let max_tokens = match context_length {
+        Some(ctx_len) => (ctx_len as f64 * 0.7) as usize, // Reserve 30% for response
+        None => return messages, // No limit
+    };
+
+    if messages.len() <= 2 {
+        return messages; // System + user message, nothing to truncate
+    }
+
+    // Count total tokens
+    let message_tokens: Vec<usize> = messages
+        .iter()
+        .map(|m| count_tokens(m.content.as_deref().unwrap_or("")))
+        .collect();
+
+    let total: usize = message_tokens.iter().sum();
+    if total <= max_tokens {
+        return messages; // Fits within budget
+    }
+
+    // Always keep the system prompt (first) and most recent message (last)
+    let system_tokens = message_tokens[0];
+    let last_tokens = message_tokens[messages.len() - 1];
+    let mut budget = max_tokens.saturating_sub(system_tokens + last_tokens);
+
+    // Work backwards from the second-to-last message, keeping as many as fit
+    let mut keep_from = messages.len() - 1; // Start just before the last message
+    for i in (1..messages.len() - 1).rev() {
+        if message_tokens[i] > budget {
+            break;
+        }
+        budget -= message_tokens[i];
+        keep_from = i;
+    }
+
+    let mut result = vec![messages[0].clone()];
+    result.extend(messages[keep_from..].to_vec());
+
+    eprintln!(
+        "[chat] Truncated message history from {} to {} messages to fit context window ({} tokens)",
+        messages.len(),
+        result.len(),
+        max_tokens
+    );
+
+    result
+}
+
 // ==================== Agent Loop ====================
 
 struct AgentContext {
@@ -196,8 +252,14 @@ where
             }
         });
 
+        // Truncate messages if they've grown beyond context window (from tool results)
+        let call_messages = truncate_messages_to_context(
+            ctx.messages.clone(),
+            provider_config.context_length(),
+        );
+
         let response = provider
-            .complete_streaming_with_tools(&ctx.messages, &tools, &config, on_delta)
+            .complete_streaming_with_tools(&call_messages, &tools, &config, on_delta)
             .await
             .map_err(|e| format!("API request failed: {}", e))?;
 
@@ -430,6 +492,9 @@ where
     // Build message history for API
     let mut api_messages = vec![Message::system(get_system_prompt(&scope_description))];
     api_messages.extend(messages);
+
+    // Truncate to fit context window for providers with limited context
+    let api_messages = truncate_messages_to_context(api_messages, provider_config.context_length());
 
     // Create agent context
     let ctx = AgentContext {

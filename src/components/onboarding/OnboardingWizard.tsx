@@ -61,6 +61,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
         await setSetting('ollama_host', state.ollamaHost);
         await setSetting('ollama_embedding_model', state.embeddingModel);
         await setSetting('ollama_llm_model', state.taggingModel);
+        await setSetting('ollama_context_length', state.ollamaContextLength);
       } else if (state.provider === 'openai_compat') {
         await setSetting('openai_compat_base_url', state.openaiCompatBaseUrl);
         await setSetting('openai_compat_api_key', state.openaiCompatApiKey);

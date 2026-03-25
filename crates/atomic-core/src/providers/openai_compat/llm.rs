@@ -102,7 +102,19 @@ struct Choice {
 #[derive(Deserialize)]
 struct ResponseMessage {
     content: Option<String>,
+    /// Some servers put structured output in reasoning_content instead of content
+    reasoning_content: Option<String>,
     tool_calls: Option<Vec<ResponseToolCall>>,
+}
+
+impl ResponseMessage {
+    /// Get the effective content, falling back to reasoning_content if content is empty
+    fn effective_content(&self) -> Option<String> {
+        match &self.content {
+            Some(c) if !c.is_empty() => Some(c.clone()),
+            _ => self.reasoning_content.clone().filter(|r| !r.is_empty()),
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -135,6 +147,7 @@ struct StreamingChoice {
 #[derive(Deserialize, Default)]
 struct StreamingDelta {
     content: Option<String>,
+    reasoning_content: Option<String>,
     tool_calls: Option<Vec<StreamingToolCall>>,
 }
 
@@ -304,13 +317,14 @@ async fn complete_internal(
         .next()
         .ok_or_else(|| ProviderError::ParseError("No choices in response".to_string()))?;
 
+    let content = choice.message.effective_content().unwrap_or_default();
     let tool_calls = choice
         .message
         .tool_calls
         .map(|tcs| tcs.iter().map(convert_tool_call).collect());
 
     Ok(CompletionResponse {
-        content: choice.message.content.unwrap_or_default(),
+        content,
         tool_calls,
     })
 }
@@ -405,7 +419,10 @@ pub async fn complete_streaming_with_tools(
                             finish_reason = choice.finish_reason.clone();
                         }
 
-                        if let Some(delta_content) = &choice.delta.content {
+                        let delta_content = choice.delta.content.as_ref()
+                            .filter(|c| !c.is_empty())
+                            .or(choice.delta.reasoning_content.as_ref().filter(|r| !r.is_empty()));
+                        if let Some(delta_content) = delta_content {
                             content.push_str(delta_content);
                             on_delta(StreamDelta::Content(delta_content.clone()));
                         }

@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use super::{
     count_atoms_with_tags, get_tag_hierarchy, synthesize_article, WikiStrategyContext,
-    MAX_WIKI_SOURCE_TOKENS,
 };
 
 // ==================== Constants ====================
@@ -197,7 +196,7 @@ async fn handle_search(
     output
 }
 
-fn handle_select(rc: &mut ResearchContext, args: &serde_json::Value) -> String {
+fn handle_select(rc: &mut ResearchContext, args: &serde_json::Value, max_source_tokens: usize) -> String {
     let chunk_ids = match args.get("chunk_ids").and_then(|v| v.as_array()) {
         Some(arr) => arr
             .iter()
@@ -251,10 +250,10 @@ fn handle_select(rc: &mut ResearchContext, args: &serde_json::Value) -> String {
         msg.push_str(&format!("\nWarnings: {}", errors.join("; ")));
     }
 
-    if rc.selected_tokens > MAX_WIKI_SOURCE_TOKENS {
+    if rc.selected_tokens > max_source_tokens {
         msg.push_str(&format!(
             "\nNote: selected tokens ({}) exceed budget ({}). Consider being more selective.",
-            rc.selected_tokens, MAX_WIKI_SOURCE_TOKENS
+            rc.selected_tokens, max_source_tokens
         ));
     }
 
@@ -278,6 +277,7 @@ async fn run_research(
     scope_tag_ids: &[String],
     provider_config: &crate::providers::ProviderConfig,
     model: &str,
+    max_source_tokens: usize,
 ) -> Result<(), String> {
     let tools = research_tools();
     let llm_config = LlmConfig::new(model);
@@ -333,7 +333,7 @@ async fn run_research(
 
             let result = match name {
                 "search" => handle_search(rc, db, scope_tag_ids, &args).await,
-                "select" => handle_select(rc, &args),
+                "select" => handle_select(rc, &args, max_source_tokens),
                 "done" => {
                     research_done = true;
                     handle_done(rc)
@@ -351,7 +351,7 @@ async fn run_research(
         }
 
         // Safety: stop if selected tokens exceed budget
-        if rc.selected_tokens > MAX_WIKI_SOURCE_TOKENS * 2 {
+        if rc.selected_tokens > max_source_tokens * 2 {
             eprintln!(
                 "[wiki/agentic] Selected tokens ({}) far exceed budget, stopping research",
                 rc.selected_tokens
@@ -367,12 +367,12 @@ async fn run_research(
 
 /// Trim selected chunks to fit within the token budget.
 /// Takes chunks in order (agent's selection order) until the budget is hit.
-fn trim_to_budget(chunks: Vec<ChunkWithContext>) -> Vec<ChunkWithContext> {
+fn trim_to_budget(chunks: Vec<ChunkWithContext>, max_source_tokens: usize) -> Vec<ChunkWithContext> {
     let mut total_tokens = 0;
     let mut trimmed = Vec::new();
     for chunk in chunks {
         let tokens = count_tokens(&chunk.content);
-        if total_tokens + tokens > MAX_WIKI_SOURCE_TOKENS && !trimmed.is_empty() {
+        if total_tokens + tokens > max_source_tokens && !trimmed.is_empty() {
             break;
         }
         total_tokens += tokens;
@@ -428,7 +428,8 @@ fn research_user_prompt_update(tag_name: &str, existing_article: &str) -> String
 pub(crate) async fn generate(
     ctx: &WikiStrategyContext,
 ) -> Result<WikiArticleWithCitations, String> {
-    eprintln!("[wiki/agentic] Starting agentic research for \"{}\"...", ctx.tag_name);
+    let max_tokens = ctx.max_source_tokens();
+    eprintln!("[wiki/agentic] Starting agentic research for \"{}\" (budget {} tokens)...", ctx.tag_name, max_tokens);
 
     // Get scope tag IDs and atom count
     let (scope_tag_ids, atom_count) = {
@@ -460,6 +461,7 @@ pub(crate) async fn generate(
         &scope_tag_ids,
         &ctx.provider_config,
         &ctx.wiki_model,
+        max_tokens,
     )
     .await?;
 
@@ -474,7 +476,7 @@ pub(crate) async fn generate(
         return Err("Agent did not select any source chunks".to_string());
     }
 
-    let chunks = trim_to_budget(raw_chunks);
+    let chunks = trim_to_budget(raw_chunks, max_tokens);
     if chunks.len() < rc.selected_indices.len() {
         eprintln!(
             "[wiki/agentic] Trimmed to {} chunks to fit token budget",
@@ -502,7 +504,8 @@ pub(crate) async fn update(
     ctx: &WikiStrategyContext,
     existing: &WikiArticleWithCitations,
 ) -> Result<Option<WikiArticleWithCitations>, String> {
-    eprintln!("[wiki/agentic] Starting agentic update for \"{}\"...", ctx.tag_name);
+    let max_tokens = ctx.max_source_tokens();
+    eprintln!("[wiki/agentic] Starting agentic update for \"{}\" (budget {} tokens)...", ctx.tag_name, max_tokens);
 
     let (scope_tag_ids, atom_count) = {
         let conn = ctx.db.conn.lock().map_err(|e| e.to_string())?;
@@ -527,6 +530,7 @@ pub(crate) async fn update(
         &scope_tag_ids,
         &ctx.provider_config,
         &ctx.wiki_model,
+        max_tokens,
     )
     .await?;
 
@@ -542,7 +546,7 @@ pub(crate) async fn update(
         return Ok(None);
     }
 
-    let chunks = trim_to_budget(raw_chunks);
+    let chunks = trim_to_budget(raw_chunks, max_tokens);
     if chunks.len() < rc.selected_indices.len() {
         eprintln!(
             "[wiki/agentic] Trimmed to {} chunks to fit token budget",

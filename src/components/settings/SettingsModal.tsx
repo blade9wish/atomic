@@ -90,6 +90,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [ollamaEmbeddingModel, setOllamaEmbeddingModel] = useState('nomic-embed-text');
   const [ollamaLlmModel, setOllamaLlmModel] = useState('llama3.2');
+  const [ollamaContextLength, setOllamaContextLength] = useState('8192');
   const [isLoadingOllamaModels, setIsLoadingOllamaModels] = useState(false);
 
   // Common settings
@@ -465,6 +466,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setOllamaHost(settings.ollama_host || 'http://127.0.0.1:11434');
     setOllamaEmbeddingModel(settings.ollama_embedding_model || 'nomic-embed-text');
     setOllamaLlmModel(settings.ollama_llm_model || 'llama3.2');
+    setOllamaContextLength(settings.ollama_context_length || '8192');
     setOpenaiCompatBaseUrl(settings.openai_compat_base_url || '');
     setOpenaiCompatApiKey(settings.openai_compat_api_key || '');
     setOpenaiCompatEmbeddingModel(settings.openai_compat_embedding_model || '');
@@ -1010,6 +1012,29 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 No LLM models found. Run: ollama pull llama3.2
                               </div>
                             )}
+                          </div>
+
+                          {/* Context Length */}
+                          <div className="space-y-1">
+                            <label className="block text-sm font-medium text-[var(--color-text-primary)]">
+                              Context Length
+                            </label>
+                            <p className="text-xs text-[var(--color-text-secondary)]">
+                              Max context window of your LLM model (used to truncate prompts)
+                            </p>
+                            <CustomSelect
+                              value={ollamaContextLength}
+                              onChange={(v) => { setOllamaContextLength(v); autoSave('ollama_context_length', v); }}
+                              options={[
+                                { value: '2048', label: '2K' },
+                                { value: '4096', label: '4K' },
+                                { value: '8192', label: '8K' },
+                                { value: '16384', label: '16K' },
+                                { value: '32768', label: '32K' },
+                                { value: '65536', label: '64K' },
+                                { value: '131072', label: '128K' },
+                              ]}
+                            />
                           </div>
                         </div>
                       )}

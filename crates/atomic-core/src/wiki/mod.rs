@@ -55,6 +55,22 @@ pub struct WikiStrategyContext {
     pub linkable_article_names: Vec<(String, String)>,
 }
 
+impl WikiStrategyContext {
+    /// Returns the maximum source material tokens for wiki generation.
+    /// For providers with a known context length, budgets ~60% for source material.
+    /// Falls back to MAX_WIKI_SOURCE_TOKENS for providers with large/unknown context.
+    pub fn max_source_tokens(&self) -> usize {
+        match self.provider_config.context_length() {
+            Some(ctx_len) => {
+                // Reserve ~40% for system prompt, output, and structured output framing
+                let budget = (ctx_len as f64 * 0.6) as usize;
+                budget.min(MAX_WIKI_SOURCE_TOKENS)
+            }
+            None => MAX_WIKI_SOURCE_TOKENS,
+        }
+    }
+}
+
 /// Generate a wiki article using the given strategy.
 pub async fn strategy_generate(
     strategy: &WikiStrategy,
