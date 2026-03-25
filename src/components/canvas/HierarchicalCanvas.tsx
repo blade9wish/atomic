@@ -234,7 +234,7 @@ export function HierarchicalCanvas() {
                 </TransformComponent>
 
                 {/* Zoom controls */}
-                <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
+                <div className="absolute bottom-4 left-4 flex flex-col gap-1 z-10">
                   <button
                     onClick={() => zoomIn()}
                     className="w-8 h-8 rounded-md bg-[var(--color-bg-card)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] flex items-center justify-center transition-colors"
