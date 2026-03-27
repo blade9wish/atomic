@@ -1,29 +1,52 @@
 use crate::event_bridge::embedding_event_callback;
 use crate::mcp::types::*;
 use crate::state::ServerEvent;
+use atomic_core::manager::DatabaseManager;
 use atomic_core::AtomicCore;
 use rmcp::{
     handler::server::tool::ToolRouter,
     handler::server::wrapper::Parameters,
     model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    service::RequestContext,
+    RoleServer,
     tool, tool_handler, tool_router, ErrorData, ServerHandler,
 };
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
-/// MCP Server for Atomic knowledge base (standalone server variant)
+/// Extension type inserted by the `on_request` hook to carry the `?db=` selection.
+#[derive(Clone, Debug)]
+pub struct DbSelection(pub Option<String>);
+
+/// MCP Server for Atomic knowledge base
 #[derive(Clone)]
 pub struct AtomicMcpServer {
-    core: AtomicCore,
+    manager: Arc<DatabaseManager>,
     event_tx: broadcast::Sender<ServerEvent>,
     tool_router: ToolRouter<Self>,
 }
 
 impl AtomicMcpServer {
-    pub fn new(core: AtomicCore, event_tx: broadcast::Sender<ServerEvent>) -> Self {
+    pub fn new(manager: Arc<DatabaseManager>, event_tx: broadcast::Sender<ServerEvent>) -> Self {
         Self {
-            core,
+            manager,
             event_tx,
             tool_router: Self::tool_router(),
+        }
+    }
+
+    /// Resolve the correct AtomicCore from the request context's DbSelection extension.
+    fn resolve_core(&self, context: &RequestContext<RoleServer>) -> Result<AtomicCore, ErrorData> {
+        let db_id = context.extensions.get::<DbSelection>().and_then(|s| s.0.clone());
+        match db_id {
+            Some(id) => self
+                .manager
+                .get_core(&id)
+                .map_err(|e| ErrorData::internal_error(format!("Database not found: {}", e), None)),
+            None => self
+                .manager
+                .active_core()
+                .map_err(|e| ErrorData::internal_error(e.to_string(), None)),
         }
     }
 }
@@ -32,12 +55,14 @@ impl AtomicMcpServer {
 impl AtomicMcpServer {
     /// Search for atoms using hybrid keyword + semantic search
     #[tool(
-        description = "Search for atoms using hybrid keyword and semantic search. Combines BM25 keyword matching with vector similarity using Reciprocal Rank Fusion for the best results. Use this to find information in the knowledge base."
+        description = "Search your memory for relevant knowledge. Use this before answering questions that may relate to previously stored information. Returns matching atoms ranked by relevance."
     )]
     async fn semantic_search(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<SemanticSearchParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        let core = self.resolve_core(&context)?;
         let limit = params.limit.unwrap_or(10).min(50);
         let threshold = params.threshold.unwrap_or(0.3).clamp(0.0, 1.0);
 
@@ -48,8 +73,7 @@ impl AtomicMcpServer {
         )
         .with_threshold(threshold);
 
-        let results = self
-            .core
+        let results = core
             .search(options)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
@@ -72,16 +96,18 @@ impl AtomicMcpServer {
 
     /// Read a single atom with optional line-based pagination
     #[tool(
-        description = "Read the full content of a specific atom by its ID. Supports line-based pagination for large atoms. Returns the atom content, metadata, and tags."
+        description = "Read the full content of a specific atom. Use this after semantic_search returns a relevant result and you need the complete text. Supports pagination for large atoms."
     )]
     async fn read_atom(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<ReadAtomParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        let core = self.resolve_core(&context)?;
         let limit = params.limit.unwrap_or(100).min(500) as usize;
         let offset = params.offset.unwrap_or(0).max(0) as usize;
 
-        let atom_with_tags = match self.core.get_atom(&params.atom_id) {
+        let atom_with_tags = match core.get_atom(&params.atom_id) {
             Ok(Some(a)) => a,
             Ok(None) => {
                 return Ok(CallToolResult::success(vec![
@@ -130,12 +156,14 @@ impl AtomicMcpServer {
 
     /// Create a new atom with markdown content
     #[tool(
-        description = "Create a new atom with markdown content. The atom will be automatically processed for embeddings and tag extraction. Returns the created atom ID."
+        description = "Remember something new. Create an atom when you learn information worth retaining across conversations — user preferences, decisions, project context, or important facts. Write concise, self-contained markdown."
     )]
     async fn create_atom(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<CreateAtomParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        let core = self.resolve_core(&context)?;
         let request = atomic_core::CreateAtomRequest {
             content: params.content.clone(),
             source_url: params.source_url,
@@ -145,8 +173,7 @@ impl AtomicMcpServer {
 
         let on_event = embedding_event_callback(self.event_tx.clone());
 
-        let result = self
-            .core
+        let result = core
             .create_atom(request, on_event)
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
@@ -155,7 +182,56 @@ impl AtomicMcpServer {
             atom: result.clone(),
         });
 
-        let response = CreatedAtom {
+        let response = AtomResponse {
+            atom_id: result.atom.id.clone(),
+            content_preview: result.atom.content.chars().take(200).collect(),
+            tags: result.tags.iter().map(|t| t.name.clone()).collect(),
+            embedding_status: result.atom.embedding_status.clone(),
+        };
+
+        let response_text = serde_json::to_string_pretty(&response)
+            .map_err(|e| ErrorData::internal_error(format!("Serialization error: {}", e), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(response_text)]))
+    }
+
+    /// Update an existing atom's content
+    #[tool(
+        description = "Revise an existing atom. Use this when you find an atom with outdated or incomplete information instead of creating a duplicate. Search first to find the atom to update."
+    )]
+    async fn update_atom(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<UpdateAtomParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let core = self.resolve_core(&context)?;
+
+        // Verify the atom exists first
+        match core.get_atom(&params.atom_id) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Atom not found: {}",
+                    params.atom_id
+                ))]));
+            }
+            Err(e) => return Err(ErrorData::internal_error(e.to_string(), None)),
+        }
+
+        let request = atomic_core::UpdateAtomRequest {
+            content: params.content,
+            source_url: params.source_url,
+            published_at: None,
+            tag_ids: None,
+        };
+
+        let on_event = embedding_event_callback(self.event_tx.clone());
+
+        let result = core
+            .update_atom(&params.atom_id, request, on_event)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let response = AtomResponse {
             atom_id: result.atom.id.clone(),
             content_preview: result.atom.content.chars().take(200).collect(),
             tags: result.tags.iter().map(|t| t.name.clone()).collect(),
@@ -174,9 +250,8 @@ impl ServerHandler for AtomicMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Atomic is a personal knowledge base with semantic search capabilities. \
-                 Use semantic_search to find relevant information, read_atom to get full content, \
-                 and create_atom to add new notes."
+                "Atomic is your long-term memory. Search before answering from recall. \
+                 Remember what's worth retaining. Update what's gone stale."
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),

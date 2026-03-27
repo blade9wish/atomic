@@ -182,18 +182,26 @@ async fn run_server(
         public_url: public_url.clone(),
     });
 
-    // Create MCP service
+    // Create MCP service with multi-database support via ?db= query param
     let mcp_manager = Arc::clone(&manager);
     let mcp_tx = event_tx.clone();
     let mcp_service = StreamableHttpService::builder()
         .service_factory(Arc::new(move || {
-            let core = mcp_manager.active_core()
-                .expect("Failed to get active database for MCP");
             Ok(mcp::AtomicMcpServer::new(
-                core,
+                Arc::clone(&mcp_manager),
                 mcp_tx.clone(),
             ))
         }))
+        .on_request_fn(|http_req, ext| {
+            let db_id = http_req
+                .query_string()
+                .split('&')
+                .find_map(|pair| {
+                    let mut parts = pair.splitn(2, '=');
+                    if parts.next()? == "db" { parts.next().map(String::from) } else { None }
+                });
+            ext.insert(mcp::DbSelection(db_id));
+        })
         .session_manager(Arc::new(LocalSessionManager::default()))
         .stateful_mode(true)
         .sse_keep_alive(Duration::from_secs(30))

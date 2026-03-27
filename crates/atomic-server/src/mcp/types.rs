@@ -48,6 +48,20 @@ pub struct CreateAtomParams {
     pub tag_ids: Option<Vec<String>>,
 }
 
+/// Input parameters for update_atom tool
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UpdateAtomParams {
+    /// The UUID of the atom to update
+    pub atom_id: String,
+
+    /// The new markdown content for the atom
+    pub content: String,
+
+    /// Optional source URL where this content originated
+    #[serde(default)]
+    pub source_url: Option<String>,
+}
+
 // ==================== Tool Output Types ====================
 
 /// A search result with atom content and similarity score
@@ -72,9 +86,9 @@ pub struct AtomContent {
     pub updated_at: String,
 }
 
-/// Created atom response
+/// Created/updated atom response
 #[derive(Debug, Serialize)]
-pub struct CreatedAtom {
+pub struct AtomResponse {
     pub atom_id: String,
     pub content_preview: String,
     pub tags: Vec<String>,

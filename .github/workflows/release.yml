@@ -77,9 +77,9 @@ jobs:
           npm run build:mcp-bridge -- --target aarch64-apple-darwin
           npm run build:mcp-bridge -- --target x86_64-apple-darwin
           lipo -create \
-            src-tauri/binaries/atomic-mcp-aarch64-apple-darwin \
-            src-tauri/binaries/atomic-mcp-x86_64-apple-darwin \
-            -output src-tauri/binaries/atomic-mcp-universal-apple-darwin
+            src-tauri/binaries/atomic-mcp-bridge-aarch64-apple-darwin \
+            src-tauri/binaries/atomic-mcp-bridge-x86_64-apple-darwin \
+            -output src-tauri/binaries/atomic-mcp-bridge-universal-apple-darwin
 
       - name: Build sidecars (Linux)
         if: matrix.platform == 'ubuntu-22.04'

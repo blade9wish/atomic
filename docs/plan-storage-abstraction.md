@@ -548,7 +548,6 @@ The migration path:
 - `crates/atomic-core/src/manager.rs` — add Postgres constructor
 - `crates/atomic-server/src/routes/*.rs` — add `.await` to AtomicCore calls
 - `crates/atomic-server/src/main.rs` — storage backend selection at startup
-- `crates/atomic-mcp/src/server.rs` — add `.await` to AtomicCore calls
 - `src-tauri/src/*.rs` — add `.await` to AtomicCore calls (Tauri commands are already async)
 
 ### 3.3 Server startup wiring

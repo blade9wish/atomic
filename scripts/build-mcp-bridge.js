@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Build script for atomic-mcp
+ * Build script for atomic-mcp-bridge
  *
- * Compiles the standalone MCP server binary and places it in src-tauri/binaries/
- * with the correct architecture suffix for Tauri's externalBin feature.
+ * Compiles the MCP bridge binary (stdio-to-HTTP adapter for atomic-server's
+ * Streamable HTTP MCP endpoint) and places it in src-tauri/binaries/ with
+ * the correct architecture suffix for Tauri's externalBin feature.
  *
  * Usage:
  *   node scripts/build-mcp-bridge.js           # Build for current platform
@@ -55,10 +56,10 @@ function main() {
     process.exit(1);
   }
 
-  console.log(`Building atomic-mcp for ${target}...`);
+  console.log(`Building atomic-mcp-bridge for ${target}...`);
 
   // Build the binary
-  const buildCmd = `cargo build -p atomic-mcp --release --target ${target}`;
+  const buildCmd = `cargo build -p atomic-mcp-bridge --release --target ${target}`;
   console.log(`Running: ${buildCmd}`);
 
   try {
@@ -73,12 +74,12 @@ function main() {
   }
 
   // Determine binary name and paths
-  const binaryName = process.platform === 'win32' ? 'atomic-mcp.exe' : 'atomic-mcp';
+  const binaryName = process.platform === 'win32' ? 'atomic-mcp-bridge.exe' : 'atomic-mcp-bridge';
   const ext = process.platform === 'win32' ? '.exe' : '';
 
   const sourcePath = join(projectRoot, 'target', target, 'release', binaryName);
   const destDir = join(projectRoot, 'src-tauri', 'binaries');
-  const destPath = join(destDir, `atomic-mcp-${target}${ext}`);
+  const destPath = join(destDir, `atomic-mcp-bridge-${target}${ext}`);
 
   // Create binaries directory if needed
   if (!existsSync(destDir)) {

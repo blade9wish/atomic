@@ -31,15 +31,16 @@ The central architectural principle is the separation of **business logic** from
                     └────────┬────────┘
               ┌──────────────┼──────────────┐
               ▼              ▼              ▼
-    ┌─────────────┐  ┌──────────────┐  ┌──────────┐
-    │  src-tauri   │  │atomic-server │  │atomic-mcp│
-    │ (Tauri IPC)  │  │ (REST + WS)  │  │  (MCP)   │
-    └──────┬──────┘  └──────┬───────┘  └──────────┘
-           │                │
-    ┌──────▼──────┐  ┌──────▼───────┐
-    │   React UI   │  │  HTTP clients│
-    │(Tauri or HTTP)│  │ (iOS, etc.) │
-    └─────────────┘  └──────────────┘
+    ┌─────────────┐  ┌──────────────┐  ┌───────────┐
+    │  src-tauri   │  │atomic-server │  │ mcp-bridge│
+    │ (Tauri IPC)  │  │(REST+WS+MCP)│  │(stdio→HTTP)│
+    └──────┬──────┘  └──────┬───────┘  └─────┬─────┘
+           │                │                 │
+    ┌──────▼──────┐  ┌──────▼───────┐        │
+    │   React UI   │  │  HTTP clients│  ┌─────▼──────┐
+    │(Tauri or HTTP)│  │ (iOS, etc.) │  │ MCP clients│
+    └─────────────┘  └──────────────┘  │(Claude,etc)│
+                                       └────────────┘
 ```
 
 ### `atomic-core` — The Facade
@@ -99,8 +100,7 @@ Development is fully headless (no Xcode GUI required). Uses `xcodebuild` + `xcru
 Cargo.toml                  # Workspace root
 crates/atomic-core/         # All business logic (no framework deps)
 crates/atomic-server/       # Headless REST + WS + MCP server
-crates/atomic-mcp/          # Standalone MCP server (stdio, direct DB)
-crates/mcp-bridge/          # HTTP-to-stdio MCP bridge
+crates/mcp-bridge/          # stdio-to-HTTP MCP bridge (for Claude Desktop, etc.)
 src-tauri/                  # Tauri desktop app (sidecar launcher)
 src/                        # React frontend (TypeScript)
 ios/                        # Native iOS app (SwiftUI, HTTP client)
