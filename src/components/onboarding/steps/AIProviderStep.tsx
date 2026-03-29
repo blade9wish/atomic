@@ -352,6 +352,25 @@ export function AIProviderStep({ state, dispatch }: AIProviderStepProps) {
                   ]}
                 />
               </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs text-[var(--color-text-secondary)]">Request Timeout (seconds)</label>
+                <CustomSelect
+                  value={state.ollamaTimeoutSecs}
+                  onChange={(v) => dispatch({ type: 'SET_OLLAMA_TIMEOUT_SECS', value: v })}
+                  options={[
+                    { value: '30', label: '30 seconds' },
+                    { value: '60', label: '60 seconds' },
+                    { value: '120', label: '2 minutes' },
+                    { value: '180', label: '3 minutes' },
+                    { value: '300', label: '5 minutes' },
+                    { value: '600', label: '10 minutes' },
+                  ]}
+                />
+                <p className="text-[10px] text-[var(--color-text-tertiary)]">
+                  Maximum time to wait for Ollama to respond. Increase for slow models or large contexts.
+                </p>
+              </div>
             </div>
           )}
         </>
@@ -454,6 +473,23 @@ export function AIProviderStep({ state, dispatch }: AIProviderStepProps) {
                   { value: '131072', label: '128K' },
                   { value: '262144', label: '256K' },
                   { value: '1000000', label: '1M' },
+                ]}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs text-[var(--color-text-secondary)]">Request Timeout</label>
+              <p className="text-xs text-[var(--color-text-secondary)]">Maximum time to wait for the server to respond</p>
+              <CustomSelect
+                value={state.openaiCompatTimeoutSecs}
+                onChange={(v) => dispatch({ type: 'SET_OPENAI_COMPAT_TIMEOUT_SECS', value: v })}
+                options={[
+                  { value: '30', label: '30 seconds' },
+                  { value: '60', label: '60 seconds' },
+                  { value: '120', label: '2 minutes' },
+                  { value: '180', label: '3 minutes' },
+                  { value: '300', label: '5 minutes' },
+                  { value: '600', label: '10 minutes' },
                 ]}
               />
             </div>
