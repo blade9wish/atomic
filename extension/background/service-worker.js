@@ -22,15 +22,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// Extract content, injecting content script if needed
+// Extract content by injecting content script on demand (activeTab)
 async function extractFromTab(tabId, mode) {
-  try {
-    const result = await chrome.tabs.sendMessage(tabId, { action: 'extract', mode });
-    if (result && result.content) return result;
-  } catch (_) {
-    // Content script not loaded — fall back to programmatic injection
-  }
-
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['lib/readability.min.js', 'lib/turndown.min.js', 'content/content-script.js']

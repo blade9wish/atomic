@@ -80,17 +80,8 @@ async function getQueue() {
   return result[QUEUE_KEY] || [];
 }
 
-// Extract content by injecting the content script directly
+// Extract content by injecting content script on demand (activeTab)
 async function extractFromTab(tabId, mode) {
-  // Try messaging the existing content script first
-  try {
-    const result = await chrome.tabs.sendMessage(tabId, { action: 'extract', mode });
-    if (result && result.content) return result;
-  } catch (_) {
-    // Content script not loaded — fall back to programmatic injection
-  }
-
-  // Inject the libraries and content script, then run extraction
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['lib/readability.min.js', 'lib/turndown.min.js', 'content/content-script.js']
