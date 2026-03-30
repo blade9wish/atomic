@@ -258,7 +258,7 @@ impl SqliteStorage {
         let (tags_merged, atoms_retagged, errors) = crate::compaction::apply_merge_operations(&conn, merges);
 
         if !errors.is_empty() {
-            eprintln!("Merge errors: {:?}", errors);
+            tracing::error!(errors = ?errors, "Merge errors");
         }
 
         Ok(CompactionResult {

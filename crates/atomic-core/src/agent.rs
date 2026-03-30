@@ -266,12 +266,12 @@ fn truncate_messages_to_context(messages: Vec<Message>, context_length: Option<u
         result.extend(messages[g.start..g.end].to_vec());
     }
 
-    eprintln!(
-        "[chat] Truncated message history from {} to {} messages ({} groups kept) to fit context window ({} tokens)",
-        messages.len(),
-        result.len(),
-        groups.len() - keep_from_group + 1,
-        max_tokens
+    tracing::info!(
+        original_messages = messages.len(),
+        truncated_messages = result.len(),
+        groups_kept = groups.len() - keep_from_group + 1,
+        max_tokens,
+        "[chat] Truncated message history to fit context window"
     );
 
     result

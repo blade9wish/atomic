@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
+import { toast } from 'sonner';
 import { getTransport } from '../../lib/transport';
 import { isTauri } from '../../lib/platform';
 import { AtomEditor } from '../atoms/AtomEditor';
@@ -97,7 +98,7 @@ export function RightDrawer() {
         .then((fetchedAtom) => {
           if (fetchedAtom) setAtom(fetchedAtom);
         })
-        .catch(() => {});
+        .catch((e) => { console.error('Failed to refresh atom:', e); toast.error('Failed to refresh atom', { id: 'atom-refresh-error', description: String(e) }); });
     }
   }, [mode, atomId, storeAtomUpdatedAt, isLoadingAtom]);
 

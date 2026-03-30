@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import { getTransport } from '../lib/transport';
 import { useAtomsStore } from './atoms';
 import { useTagsStore } from './tags';
@@ -57,60 +58,90 @@ export const useDatabasesStore = create<DatabasesStore>((set, get) => ({
   },
 
   createDatabase: async (name: string) => {
-    const transport = getTransport();
-    const info = await transport.invoke('create_database', { name }) as DatabaseInfo;
-    await get().fetchDatabases();
-    return info;
+    try {
+      const transport = getTransport();
+      const info = await transport.invoke('create_database', { name }) as DatabaseInfo;
+      await get().fetchDatabases();
+      return info;
+    } catch (e) {
+      toast.error('Failed to create database', { description: String(e) });
+      throw e;
+    }
   },
 
   renameDatabase: async (id: string, name: string) => {
-    const transport = getTransport();
-    await transport.invoke('rename_database', { id, name });
-    await get().fetchDatabases();
+    try {
+      const transport = getTransport();
+      await transport.invoke('rename_database', { id, name });
+      await get().fetchDatabases();
+    } catch (e) {
+      toast.error('Failed to rename database', { description: String(e) });
+      throw e;
+    }
   },
 
   deleteDatabase: async (id: string) => {
-    const transport = getTransport();
-    const wasActive = get().activeId === id;
-    await transport.invoke('delete_database', { id });
-    await get().fetchDatabases();
+    try {
+      const transport = getTransport();
+      const wasActive = get().activeId === id;
+      await transport.invoke('delete_database', { id });
+      await get().fetchDatabases();
 
-    // If the deleted DB was active, the backend switched to default —
-    // reset data stores to load the new active DB's data
-    if (wasActive) {
-      useAtomsStore.getState().reset();
-      useTagsStore.getState().reset();
-      useWikiStore.getState().reset();
-      useChatStore.getState().reset();
-      useTagsStore.getState().fetchTags();
-      useAtomsStore.getState().fetchAtoms();
+      // If the deleted DB was active, the backend switched to default —
+      // reset data stores to load the new active DB's data
+      if (wasActive) {
+        useAtomsStore.getState().reset();
+        useTagsStore.getState().reset();
+        useWikiStore.getState().reset();
+        useChatStore.getState().reset();
+        useTagsStore.getState().fetchTags();
+        useAtomsStore.getState().fetchAtoms();
+      }
+    } catch (e) {
+      toast.error('Failed to delete database', { description: String(e) });
+      throw e;
     }
   },
 
   setDefaultDatabase: async (id: string) => {
-    const transport = getTransport();
-    await transport.invoke('set_default_database', { id });
-    await get().fetchDatabases();
+    try {
+      const transport = getTransport();
+      await transport.invoke('set_default_database', { id });
+      await get().fetchDatabases();
+    } catch (e) {
+      toast.error('Failed to set default database', { description: String(e) });
+      throw e;
+    }
   },
 
   getDatabaseStats: async (id: string) => {
-    const transport = getTransport();
-    return await transport.invoke('get_database_stats', { id }) as DatabaseStats;
+    try {
+      const transport = getTransport();
+      return await transport.invoke('get_database_stats', { id }) as DatabaseStats;
+    } catch (e) {
+      toast.error('Failed to load database stats', { description: String(e) });
+      throw e;
+    }
   },
 
   switchDatabase: async (id: string) => {
-    const transport = getTransport();
-    await transport.invoke('activate_database', { id });
-    set({ activeId: id });
+    try {
+      const transport = getTransport();
+      await transport.invoke('activate_database', { id });
+      set({ activeId: id });
 
-    // Reset all data stores to force refetch
-    useAtomsStore.getState().reset();
-    useTagsStore.getState().reset();
-    useWikiStore.getState().reset();
-    useChatStore.getState().reset();
+      // Reset all data stores to force refetch
+      useAtomsStore.getState().reset();
+      useTagsStore.getState().reset();
+      useWikiStore.getState().reset();
+      useChatStore.getState().reset();
 
-    // Refetch data for the new database
-    useTagsStore.getState().fetchTags();
-    useAtomsStore.getState().fetchAtoms();
+      // Refetch data for the new database
+      useTagsStore.getState().fetchTags();
+      useAtomsStore.getState().fetchAtoms();
+    } catch (e) {
+      toast.error('Failed to switch database', { description: String(e) });
+      throw e;
+    }
   },
 }));

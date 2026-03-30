@@ -160,7 +160,7 @@ impl SqliteStorage {
             wiki::centroid::select_chunks_by_centroid(&conn, centroid, &scoped_atom_ids, max_source_tokens)
                 .map_err(|e| AtomicCoreError::Wiki(e))?
         } else {
-            eprintln!("[wiki/storage] No centroid for tag {}, falling back to unranked chunk selection", tag_id);
+            tracing::debug!(tag_id, "[wiki/storage] No centroid for tag, falling back to unranked chunk selection");
             wiki::centroid::select_chunks_unranked(&conn, &placeholders, &all_tag_ids, max_source_tokens)
                 .map_err(|e| AtomicCoreError::Wiki(e))?
         };
@@ -217,7 +217,7 @@ impl SqliteStorage {
             wiki::centroid::select_chunks_by_centroid(&conn, centroid, &new_atom_id_set, max_source_tokens)
                 .map_err(|e| AtomicCoreError::Wiki(e))?
         } else {
-            eprintln!("[wiki/storage] No centroid for tag {}, falling back to unranked update chunk selection", tag_id);
+            tracing::debug!(tag_id, "[wiki/storage] No centroid for tag, falling back to unranked update chunk selection");
             wiki::centroid::select_new_chunks_unranked(&conn, &new_atom_id_set, max_source_tokens)
                 .map_err(|e| AtomicCoreError::Wiki(e))?
         };

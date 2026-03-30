@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import { getTransport } from '../lib/transport';
 
 // Types matching the Rust structs
@@ -184,6 +185,7 @@ export const useWikiStore = create<WikiStore>((set, get) => ({
       set({ suggestedArticles: suggestions, isLoadingSuggestions: false });
     } catch (error) {
       console.error('Failed to fetch suggested articles:', error);
+      toast.error('Failed to load suggested articles', { id: 'wiki-suggestions-error', description: String(error) });
       set({ isLoadingSuggestions: false });
     }
   },
@@ -280,6 +282,7 @@ export const useWikiStore = create<WikiStore>((set, get) => ({
       set({ articleStatus: status });
     } catch (error) {
       console.error('Failed to fetch article status:', error);
+      toast.error('Failed to load article status', { id: 'wiki-status-error', description: String(error) });
     }
   },
 
@@ -289,6 +292,7 @@ export const useWikiStore = create<WikiStore>((set, get) => ({
       set({ relatedTags: tags });
     } catch (error) {
       console.error('Failed to fetch related tags:', error);
+      toast.error('Failed to load related tags', { id: 'wiki-related-error', description: String(error) });
     }
   },
 
@@ -298,6 +302,7 @@ export const useWikiStore = create<WikiStore>((set, get) => ({
       set({ wikiLinks: links });
     } catch (error) {
       console.error('Failed to fetch wiki links:', error);
+      toast.error('Failed to load wiki links', { id: 'wiki-links-error', description: String(error) });
     }
   },
 
@@ -352,6 +357,7 @@ export const useWikiStore = create<WikiStore>((set, get) => ({
       set({ versions });
     } catch (error) {
       console.error('Failed to fetch wiki versions:', error);
+      toast.error('Failed to load version history', { id: 'wiki-versions-error', description: String(error) });
     }
   },
 
@@ -361,6 +367,7 @@ export const useWikiStore = create<WikiStore>((set, get) => ({
       set({ selectedVersion: version });
     } catch (error) {
       console.error('Failed to fetch wiki version:', error);
+      toast.error('Failed to load version', { id: 'wiki-version-error', description: String(error) });
     }
   },
 

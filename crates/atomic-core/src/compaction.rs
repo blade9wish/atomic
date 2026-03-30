@@ -209,9 +209,7 @@ async fn get_merge_suggestions(
             Ok(response) => {
                 let content = &response.content;
                 if !content.is_empty() {
-                    eprintln!("=== MERGE LLM OUTPUT ===");
-                    eprintln!("{}", content);
-                    eprintln!("========================");
+                    tracing::debug!(output = %content, "MERGE LLM OUTPUT");
 
                     let result: MergeResult = serde_json::from_str(content).map_err(|e| {
                         format!("Failed to parse merge result: {} - Content: {}", e, content)
@@ -222,14 +220,12 @@ async fn get_merge_suggestions(
             }
             Err(e) => {
                 let err_str = e.to_string();
-                eprintln!("=== MERGE LLM ERROR (attempt {}/{}) ===", attempt + 1, 3);
-                eprintln!("Error: {}", err_str);
-                eprintln!("======================================");
-                
                 if e.is_retryable() {
+                    tracing::warn!(attempt = attempt + 1, max_attempts = 3, model = %model, error = %err_str, "Tag merge LLM call failed (retryable)");
                     last_error = err_str;
                     continue;
                 } else {
+                    tracing::error!(model = %model, error = %err_str, "Tag merge LLM call failed (non-retryable)");
                     last_error = err_str;
                     break;
                 }
@@ -244,7 +240,7 @@ fn execute_tag_merge(conn: &Connection, merge: &TagMerge) -> Result<(bool, i32),
     let winner_id = match get_tag_id_by_name(conn, &merge.winner_name) {
         Some(id) => id,
         None => {
-            eprintln!("Skipping merge: winner '{}' not found", merge.winner_name);
+            tracing::warn!(winner = %merge.winner_name, "Skipping merge: winner not found");
             return Ok((false, 0));
         }
     };
@@ -252,30 +248,33 @@ fn execute_tag_merge(conn: &Connection, merge: &TagMerge) -> Result<(bool, i32),
     let loser_id = match get_tag_id_by_name(conn, &merge.loser_name) {
         Some(id) => id,
         None => {
-            eprintln!("Skipping merge: loser '{}' not found", merge.loser_name);
+            tracing::warn!(loser = %merge.loser_name, "Skipping merge: loser not found");
             return Ok((false, 0));
         }
     };
 
     if winner_id == loser_id {
-        eprintln!(
-            "Skipping merge: '{}' and '{}' are the same tag",
-            merge.winner_name, merge.loser_name
+        tracing::warn!(
+            winner = %merge.winner_name,
+            loser = %merge.loser_name,
+            "Skipping merge: same tag"
         );
         return Ok((false, 0));
     }
 
     if is_descendant_of(conn, &loser_id, &winner_id)? {
-        eprintln!(
-            "Skipping merge: '{}' is a descendant of '{}'",
-            merge.loser_name, merge.winner_name
+        tracing::warn!(
+            loser = %merge.loser_name,
+            winner = %merge.winner_name,
+            "Skipping merge: loser is a descendant of winner"
         );
         return Ok((false, 0));
     }
     if is_descendant_of(conn, &winner_id, &loser_id)? {
-        eprintln!(
-            "Skipping merge: '{}' is a descendant of '{}'",
-            merge.winner_name, merge.loser_name
+        tracing::warn!(
+            winner = %merge.winner_name,
+            loser = %merge.loser_name,
+            "Skipping merge: winner is a descendant of loser"
         );
         return Ok((false, 0));
     }
@@ -319,9 +318,12 @@ fn execute_tag_merge(conn: &Connection, merge: &TagMerge) -> Result<(bool, i32),
     )
     .map_err(|e| format!("Failed to delete loser tag: {}", e))?;
 
-    eprintln!(
-        "Merged '{}' into '{}' ({} atoms retagged): {}",
-        merge.loser_name, merge.winner_name, atoms_retagged, merge.reason
+    tracing::info!(
+        loser = %merge.loser_name,
+        winner = %merge.winner_name,
+        atoms_retagged,
+        reason = %merge.reason,
+        "Merged tags"
     );
 
     Ok((true, atoms_retagged))

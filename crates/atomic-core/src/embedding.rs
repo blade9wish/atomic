@@ -46,6 +46,8 @@ pub async fn generate_embeddings_with_config(
 ) -> Result<Vec<Vec<f32>>, String> {
     let provider = get_embedding_provider(config).map_err(|e| e.to_string())?;
     let embed_config = EmbeddingConfig::new(config.embedding_model());
+    let model = config.embedding_model();
+    let provider_type = format!("{:?}", config.provider_type);
 
     let mut last_error = String::new();
     for attempt in 0..3u32 {
@@ -58,9 +60,23 @@ pub async fn generate_embeddings_with_config(
             Err(e) => {
                 last_error = e.to_string();
                 if e.is_retryable() {
-                    eprintln!("Embedding attempt {} failed (retryable): {}", attempt + 1, last_error);
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        model = %model,
+                        provider = %provider_type,
+                        batch_size = texts.len(),
+                        error = %last_error,
+                        "Embedding attempt failed (retryable)"
+                    );
                     continue;
                 } else {
+                    tracing::error!(
+                        model = %model,
+                        provider = %provider_type,
+                        batch_size = texts.len(),
+                        error = %last_error,
+                        "Embedding failed (non-retryable)"
+                    );
                     break;
                 }
             }
@@ -84,17 +100,17 @@ struct PendingChunk {
 
 /// Embed a list of chunks in adaptive batches.
 /// Splits into batches of EMBEDDING_BATCH_SIZE, calls the API, and on failure
-/// retries at half batch size recursively. Returns (embedded, failed_atom_ids).
+/// retries at half batch size recursively. Returns (embedded, failed: Vec<(atom_id, error)>).
 async fn embed_chunks_batched(
     config: &ProviderConfig,
     chunks: Vec<PendingChunk>,
-) -> (Vec<(PendingChunk, Vec<f32>)>, Vec<String>) {
+) -> (Vec<(PendingChunk, Vec<f32>)>, Vec<(String, String)>) {
     if chunks.is_empty() {
         return (vec![], vec![]);
     }
 
     let mut results: Vec<(PendingChunk, Vec<f32>)> = Vec::with_capacity(chunks.len());
-    let mut failed_atom_ids: Vec<String> = Vec::new();
+    let mut failed_atoms: Vec<(String, String)> = Vec::new();
 
     // Split chunks into batches
     let batches: Vec<Vec<PendingChunk>> = chunks
@@ -106,28 +122,28 @@ async fn embed_chunks_batched(
 
     let total_batches = batches.len();
     for (batch_idx, batch) in batches.into_iter().enumerate() {
-        eprintln!(
-            "Embedding batch {}/{} ({} chunks)...",
-            batch_idx + 1,
+        tracing::info!(
+            batch = batch_idx + 1,
             total_batches,
-            batch.len()
+            chunks = batch.len(),
+            "Embedding batch"
         );
         let (mut successes, mut failures) = embed_batch_adaptive(config, batch).await;
         results.append(&mut successes);
-        failed_atom_ids.append(&mut failures);
+        failed_atoms.append(&mut failures);
     }
 
-    failed_atom_ids.sort();
-    failed_atom_ids.dedup();
-    (results, failed_atom_ids)
+    failed_atoms.sort_by(|a, b| a.0.cmp(&b.0));
+    failed_atoms.dedup_by(|a, b| a.0 == b.0);
+    (results, failed_atoms)
 }
 
 /// Try to embed a batch. On failure, split in half and retry each half.
-/// Base case: single chunk failure returns the atom_id as failed.
+/// Base case: single chunk failure returns the (atom_id, error) as failed.
 fn embed_batch_adaptive(
     config: &ProviderConfig,
     batch: Vec<PendingChunk>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = (Vec<(PendingChunk, Vec<f32>)>, Vec<String>)> + Send + '_>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = (Vec<(PendingChunk, Vec<f32>)>, Vec<(String, String)>)> + Send + '_>> {
     Box::pin(async move {
     if batch.is_empty() {
         return (vec![], vec![]);
@@ -146,12 +162,14 @@ fn embed_batch_adaptive(
         Err(e) => {
             if batch.len() == 1 {
                 // Single chunk failed — mark atom as failed
-                eprintln!(
-                    "Embedding failed for atom {} chunk {}: {}",
-                    batch[0].atom_id, batch[0].chunk_index, e
+                tracing::error!(
+                    atom_id = %batch[0].atom_id,
+                    chunk_index = batch[0].chunk_index,
+                    error = %e,
+                    "Single chunk embedding failed after retries"
                 );
                 let failed_id = batch[0].atom_id.clone();
-                (vec![], vec![failed_id])
+                (vec![], vec![(failed_id, e)])
             } else {
                 // Split in half and retry each half
                 let mid = batch.len() / 2;
@@ -162,11 +180,11 @@ fn embed_batch_adaptive(
                 let first: Vec<PendingChunk> = first_half.into_iter().map(|(_, c)| c).collect();
                 let second: Vec<PendingChunk> = second_half.into_iter().map(|(_, c)| c).collect();
 
-                eprintln!(
-                    "Batch of {} failed, retrying as 2 batches of {}/{}...",
-                    mid * 2,
-                    first.len(),
-                    second.len()
+                tracing::warn!(
+                    original_size = mid * 2,
+                    first_half = first.len(),
+                    second_half = second.len(),
+                    "Batch failed, retrying as 2 smaller batches"
                 );
 
                 let (mut r1, mut f1) = embed_batch_adaptive(config, first).await;
@@ -299,16 +317,18 @@ async fn process_embedding_only_inner(
         match storage.compute_semantic_edges_for_atom_sync(atom_id, 0.5, 15) {
             Ok(edge_count) => {
                 if edge_count > 0 {
-                    eprintln!(
-                        "Created {} semantic edges for atom {}",
-                        edge_count, atom_id
+                    tracing::debug!(
+                        edge_count,
+                        atom_id,
+                        "Created semantic edges for atom"
                     );
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to compute semantic edges for atom {}: {}",
-                    atom_id, e
+                tracing::warn!(
+                    atom_id,
+                    error = %e,
+                    "Failed to compute semantic edges for atom"
                 );
             }
         }
@@ -318,7 +338,7 @@ async fn process_embedding_only_inner(
     let tag_ids = storage.get_atom_tag_ids_impl(atom_id).unwrap_or_default();
     if !tag_ids.is_empty() {
         if let Err(e) = storage.compute_tag_centroids_batch_impl(&tag_ids) {
-            eprintln!("Warning: Failed to recompute tag embeddings for atom {}: {}", atom_id, e);
+            tracing::warn!(atom_id, error = %e, "Failed to recompute tag embeddings for atom");
         }
     }
 
@@ -444,7 +464,7 @@ async fn process_tagging_only_inner(
 
         match storage.get_or_create_tag_impl(&tag_application.name, tag_application.parent_name.as_deref()) {
             Ok(tag_id) => all_tag_ids.push(tag_id),
-            Err(e) => eprintln!("Failed to get/create tag '{}': {}", tag_application.name, e),
+            Err(e) => tracing::error!(tag_name = %tag_application.name, error = %e, "Failed to get/create tag"),
         }
     }
 
@@ -673,9 +693,9 @@ async fn process_embedding_batch_inner<F>(
         return;
     }
 
-    eprintln!(
-        "Starting pipeline for {} atoms (cross-atom batching + concurrent tagging)...",
-        total_count
+    tracing::info!(
+        total_count,
+        "Starting pipeline for atoms (cross-atom batching + concurrent tagging)"
     );
 
     // === Phase 1a: Get settings ===
@@ -686,7 +706,7 @@ async fn process_embedding_batch_inner<F>(
                 match storage.get_all_settings_sync() {
                     Ok(s) => s,
                     Err(e) => {
-                        eprintln!("Failed to get settings: {}", e);
+                        tracing::error!(error = %e, "Failed to get settings");
                         return;
                     }
                 }
@@ -697,7 +717,7 @@ async fn process_embedding_batch_inner<F>(
         if provider_config.provider_type == ProviderType::OpenRouter
             && provider_config.openrouter_api_key.is_none()
         {
-            eprintln!("OpenRouter API key not configured. Skipping embedding.");
+            tracing::warn!("OpenRouter API key not configured, skipping embedding");
             return;
         }
 
@@ -708,10 +728,10 @@ async fn process_embedding_batch_inner<F>(
     {
         let atom_ids: Vec<String> = atoms.iter().map(|(id, _)| id.clone()).collect();
         if let Err(e) = storage.delete_chunks_batch_sync(&atom_ids) {
-            eprintln!("Failed to clean up old chunks: {}", e);
+            tracing::error!(error = %e, "Failed to clean up old chunks");
             return;
         }
-        eprintln!("DB cleanup complete for {} atoms", total_count);
+        tracing::info!(total_count, "DB cleanup complete for atoms");
     }
 
     // === Phase 1c: Chunk content (NO lock — CPU only) ===
@@ -733,7 +753,7 @@ async fn process_embedding_batch_inner<F>(
         }
 
         if (i + 1) % 500 == 0 {
-            eprintln!("Chunking progress: {}/{} atoms", i + 1, total_count);
+            tracing::info!(progress = i + 1, total_count, "Chunking progress");
         }
     }
 
@@ -748,10 +768,10 @@ async fn process_embedding_batch_inner<F>(
         }
     }
 
-    eprintln!(
-        "Pre-chunked {} atoms into {} total chunks",
-        total_count,
-        all_chunks.len()
+    tracing::info!(
+        atoms = total_count,
+        chunks = all_chunks.len(),
+        "Pre-chunked atoms into chunks"
     );
 
     // === Phase 2: Spawn tagging tasks concurrently (independent of embedding) ===
@@ -796,7 +816,7 @@ async fn process_embedding_batch_inner<F>(
     }
 
     // === Phase 3: Cross-atom batched embedding API calls ===
-    let (embedded_chunks, failed_atom_ids) =
+    let (embedded_chunks, failed_atoms) =
         embed_chunks_batched(&provider_config, all_chunks).await;
 
     // === Phase 4: Store results in DB per-atom ===
@@ -837,18 +857,18 @@ async fn process_embedding_batch_inner<F>(
         }
 
         // Mark atoms that failed embedding API calls
-        for atom_id in &failed_atom_ids {
+        for (atom_id, error) in &failed_atoms {
             storage.set_embedding_status_sync(atom_id, "failed").ok();
             on_event(EmbeddingEvent::EmbeddingFailed {
                 atom_id: atom_id.clone(),
-                error: "Embedding API call failed after retries".to_string(),
+                error: error.clone(),
             });
         }
 
-        eprintln!(
-            "Embeddings stored: {} succeeded, {} failed",
-            completed_atom_ids.len(),
-            failed_atom_ids.len()
+        tracing::info!(
+            succeeded = completed_atom_ids.len(),
+            failed = failed_atoms.len(),
+            "Embeddings stored"
         );
 
         // Rebuild FTS index to include all new chunks
@@ -857,27 +877,27 @@ async fn process_embedding_batch_inner<F>(
 
     // === Phase 4b: Compute semantic edges ===
     if total_count > 1 && !completed_atom_ids.is_empty() {
-        eprintln!(
-            "Computing semantic edges for {} atoms...",
-            completed_atom_ids.len()
+        tracing::info!(
+            count = completed_atom_ids.len(),
+            "Computing semantic edges for atoms"
         );
         let mut total_edges = 0;
         for (i, atom_id) in completed_atom_ids.iter().enumerate() {
             match storage.compute_semantic_edges_for_atom_sync(atom_id, 0.5, 15) {
                 Ok(count) => total_edges += count,
                 Err(e) => {
-                    eprintln!("Warning: Failed to compute edges for {}: {}", atom_id, e)
+                    tracing::warn!(atom_id = %atom_id, error = %e, "Failed to compute edges for atom")
                 }
             }
 
             if (i + 1) % 1000 == 0 {
-                eprintln!("Edge progress: {}/{} atoms ({} edges)", i + 1, completed_atom_ids.len(), total_edges);
+                tracing::info!(progress = i + 1, total = completed_atom_ids.len(), total_edges, "Edge computation progress");
             }
         }
-        eprintln!(
-            "Created {} total semantic edges for {} atoms",
+        tracing::info!(
             total_edges,
-            completed_atom_ids.len()
+            atoms = completed_atom_ids.len(),
+            "Created total semantic edges for atoms"
         );
     }
 
@@ -894,9 +914,9 @@ async fn process_embedding_batch_inner<F>(
         affected_tag_ids.dedup();
 
         if !affected_tag_ids.is_empty() {
-            eprintln!("Recomputing centroid embeddings for {} tags...", affected_tag_ids.len());
+            tracing::info!(count = affected_tag_ids.len(), "Recomputing centroid embeddings for tags");
             if let Err(e) = storage.compute_tag_centroids_batch_impl(&affected_tag_ids) {
-                eprintln!("Warning: Failed to recompute tag embeddings: {}", e);
+                tracing::warn!(error = %e, "Failed to recompute tag embeddings");
             }
         }
     }
@@ -907,9 +927,9 @@ async fn process_embedding_batch_inner<F>(
     }
 
     if skip_tagging {
-        eprintln!("Pipeline complete. Tagging was skipped (re-embedding only).");
+        tracing::info!("Pipeline complete. Tagging was skipped (re-embedding only).");
     } else {
-        eprintln!("Pipeline complete. All embedding and tagging tasks finished.");
+        tracing::info!("Pipeline complete. All embedding and tagging tasks finished.");
     }
 }
 
@@ -1388,7 +1408,7 @@ pub fn compute_tag_embeddings_batch(
             match acc.finalize() {
                 Some(blob) => {
                     if let Err(e) = upsert_tag_centroid(conn, tag_id, &blob, acc.count as i32) {
-                        eprintln!("Warning: Failed to write centroid for tag {}: {}", tag_id, e);
+                        tracing::warn!(tag_id, error = %e, "Failed to write centroid for tag");
                     }
                 }
                 None => {

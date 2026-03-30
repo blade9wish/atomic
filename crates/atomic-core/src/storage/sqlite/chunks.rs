@@ -183,18 +183,19 @@ impl SqliteStorage {
                 Ok(edge_count) => {
                     total_edges += edge_count;
                     if (idx + 1) % 50 == 0 {
-                        eprintln!(
-                            "Processed {}/{} atoms, {} edges so far",
-                            idx + 1,
-                            atom_ids.len(),
-                            total_edges
+                        tracing::info!(
+                            progress = idx + 1,
+                            total = atom_ids.len(),
+                            total_edges,
+                            "Edge computation progress"
                         );
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to compute edges for atom {}: {}",
-                        atom_id, e
+                    tracing::warn!(
+                        atom_id = %atom_id,
+                        error = %e,
+                        "Failed to compute edges for atom"
                     );
                 }
             }
@@ -305,12 +306,12 @@ impl SqliteStorage {
             .collect::<Result<Vec<_>, _>>()?;
 
         let count = tag_ids.len() as i32;
-        eprintln!("Recomputing centroid embeddings for {} tags...", count);
+        tracing::info!(count, "Recomputing centroid embeddings for tags");
 
         embedding::compute_tag_embeddings_batch(&conn, &tag_ids)
             .map_err(|e| AtomicCoreError::Embedding(e))?;
 
-        eprintln!("Tag centroid embeddings recomputed for {} tags", count);
+        tracing::info!(count, "Tag centroid embeddings recomputed");
         Ok(count)
     }
 

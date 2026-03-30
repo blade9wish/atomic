@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
+use tracing;
 
 const SIDECAR_PORT: u16 = 44380;
 const HEALTH_POLL_INTERVAL_MS: u64 = 100;
@@ -60,6 +61,13 @@ fn ensure_local_token(app_data_dir: &std::path::Path) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "atomic_lib=info,atomic_core=info,warn".parse().unwrap()),
+        )
+        .init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -73,7 +81,7 @@ pub fn run() {
             std::fs::create_dir_all(&app_data_dir)
                 .expect("Failed to create app data directory");
 
-            eprintln!("Data directory: {:?}", app_data_dir);
+            tracing::info!(path = ?app_data_dir, "Data directory");
 
             // Bootstrap auth token (opens registry/manager)
             let auth_token = ensure_local_token(&app_data_dir);
@@ -94,7 +102,7 @@ pub fn run() {
                 .is_ok_and(|r| r.status().is_success());
 
             if already_running {
-                eprintln!("Atomic server already running at {}, reusing it", base_url);
+                tracing::info!(url = %base_url, "Atomic server already running, reusing it");
                 app.manage(SidecarState {
                     child: Mutex::new(None),
                 });
@@ -121,17 +129,17 @@ pub fn run() {
                     while let Some(event) = rx.recv().await {
                         match event {
                             CommandEvent::Stdout(line) => {
-                                eprintln!("[sidecar stdout] {}", String::from_utf8_lossy(&line));
+                                tracing::debug!(output = %String::from_utf8_lossy(&line), "sidecar stdout");
                             }
                             CommandEvent::Stderr(line) => {
-                                eprintln!("[sidecar stderr] {}", String::from_utf8_lossy(&line));
+                                tracing::debug!(output = %String::from_utf8_lossy(&line), "sidecar stderr");
                             }
                             CommandEvent::Terminated(payload) => {
-                                eprintln!("[sidecar] terminated: {:?}", payload);
+                                tracing::info!(?payload, "sidecar terminated");
                                 break;
                             }
                             CommandEvent::Error(err) => {
-                                eprintln!("[sidecar] error: {}", err);
+                                tracing::debug!(error = %err, "sidecar error");
                             }
                             _ => {}
                         }
@@ -146,7 +154,7 @@ pub fn run() {
                 let start = std::time::Instant::now();
                 loop {
                     if start.elapsed().as_millis() as u64 > HEALTH_TIMEOUT_MS {
-                        eprintln!("Warning: sidecar health check timed out after {}ms", HEALTH_TIMEOUT_MS);
+                        tracing::warn!(timeout_ms = HEALTH_TIMEOUT_MS, "Sidecar health check timed out");
                         break;
                     }
                     match reqwest::blocking::Client::new()
@@ -155,7 +163,7 @@ pub fn run() {
                         .send()
                     {
                         Ok(resp) if resp.status().is_success() => {
-                            eprintln!("Sidecar ready at {} ({}ms)", base_url, start.elapsed().as_millis());
+                            tracing::debug!(url = %base_url, elapsed_ms = start.elapsed().as_millis(), "Sidecar ready");
                             break;
                         }
                         _ => {
@@ -178,7 +186,7 @@ pub fn run() {
                 if let Some(state) = app.try_state::<SidecarState>() {
                     if let Ok(mut child_opt) = state.child.lock() {
                         if let Some(SidecarChild(child)) = child_opt.take() {
-                            eprintln!("Shutting down sidecar...");
+                            tracing::info!("Shutting down sidecar");
                             let _ = child.kill();
                         }
                     }

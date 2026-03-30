@@ -95,7 +95,7 @@ impl PostgresStorage {
         {
             Some(id) => id,
             None => {
-                eprintln!("Skipping merge: winner '{}' not found", merge.winner_name);
+                tracing::warn!(winner = %merge.winner_name, "Skipping merge: winner not found");
                 return Ok((false, 0));
             }
         };
@@ -105,15 +105,16 @@ impl PostgresStorage {
         {
             Some(id) => id,
             None => {
-                eprintln!("Skipping merge: loser '{}' not found", merge.loser_name);
+                tracing::warn!(loser = %merge.loser_name, "Skipping merge: loser not found");
                 return Ok((false, 0));
             }
         };
 
         if winner_id == loser_id {
-            eprintln!(
-                "Skipping merge: '{}' and '{}' are the same tag",
-                merge.winner_name, merge.loser_name
+            tracing::warn!(
+                winner = %merge.winner_name,
+                loser = %merge.loser_name,
+                "Skipping merge: same tag"
             );
             return Ok((false, 0));
         }
@@ -121,18 +122,20 @@ impl PostgresStorage {
         if self.is_descendant_of(&loser_id, &winner_id).await
             .map_err(|e| e.to_string())?
         {
-            eprintln!(
-                "Skipping merge: '{}' is a descendant of '{}'",
-                merge.loser_name, merge.winner_name
+            tracing::warn!(
+                loser = %merge.loser_name,
+                winner = %merge.winner_name,
+                "Skipping merge: loser is a descendant of winner"
             );
             return Ok((false, 0));
         }
         if self.is_descendant_of(&winner_id, &loser_id).await
             .map_err(|e| e.to_string())?
         {
-            eprintln!(
-                "Skipping merge: '{}' is a descendant of '{}'",
-                merge.winner_name, merge.loser_name
+            tracing::warn!(
+                winner = %merge.winner_name,
+                loser = %merge.loser_name,
+                "Skipping merge: winner is a descendant of loser"
             );
             return Ok((false, 0));
         }
@@ -189,9 +192,12 @@ impl PostgresStorage {
             .await
             .map_err(|e| format!("Failed to delete loser tag: {}", e))?;
 
-        eprintln!(
-            "Merged '{}' into '{}' ({} atoms retagged): {}",
-            merge.loser_name, merge.winner_name, atoms_retagged, merge.reason
+        tracing::info!(
+            loser = %merge.loser_name,
+            winner = %merge.winner_name,
+            atoms_retagged,
+            reason = %merge.reason,
+            "Merged tags"
         );
 
         Ok((true, atoms_retagged))
@@ -948,7 +954,7 @@ impl TagStore for PostgresStorage {
 
             // If parent is unused and has no wiki, delete it and recurse
             if child_count == 0 && atom_count == 0 && !has_wiki {
-                eprintln!("Cleaning up orphaned parent tag: {}", parent);
+                tracing::debug!(parent = %parent, "Cleaning up orphaned parent tag");
                 sqlx::query("DELETE FROM tags WHERE id = $1 AND db_id = $2")
                     .bind(&parent)
                     .bind(&self.db_id)
@@ -988,7 +994,7 @@ impl TagStore for PostgresStorage {
         }
 
         if !errors.is_empty() {
-            eprintln!("Merge errors: {:?}", errors);
+            tracing::error!(errors = ?errors, "Merge errors");
         }
 
         Ok(CompactionResult {

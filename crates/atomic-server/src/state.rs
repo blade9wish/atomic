@@ -1,5 +1,6 @@
 //! Application state and server event types
 
+use crate::log_buffer::LogBuffer;
 use atomic_core::{AtomicCore, DatabaseManager};
 use serde::Serialize;
 use std::sync::Arc;
@@ -11,6 +12,8 @@ pub struct AppState {
     pub event_tx: broadcast::Sender<ServerEvent>,
     /// Public URL for OAuth discovery (set via --public-url CLI flag)
     pub public_url: Option<String>,
+    /// In-memory ring buffer for recent log lines (for user export)
+    pub log_buffer: LogBuffer,
 }
 
 impl AppState {
@@ -171,7 +174,7 @@ impl From<atomic_core::EmbeddingEvent> for ServerEvent {
                 new_tags_created,
             },
             atomic_core::EmbeddingEvent::TaggingFailed { atom_id, ref error } => {
-                eprintln!("Tagging failed for atom {}: {}", atom_id, error);
+                tracing::warn!(atom_id, error = %error, "Tagging failed");
                 ServerEvent::TaggingFailed { atom_id, error: error.clone() }
             }
             atomic_core::EmbeddingEvent::TaggingSkipped { atom_id } => {

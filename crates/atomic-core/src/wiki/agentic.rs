@@ -154,7 +154,7 @@ async fn handle_search(
         return "Error: query is required".to_string();
     }
 
-    eprintln!("[wiki/agentic] search(\"{}\" limit={})", query, limit);
+    tracing::debug!(query = %query, limit, "[wiki/agentic] search");
 
     // Perform hybrid search: keyword + vector, merged via RRF
     let keyword_results = match storage.keyword_search_chunks_sync(&query, limit * 2, scope_tag_ids) {
@@ -209,12 +209,12 @@ async fn handle_search(
         .collect();
 
     if new_results.is_empty() {
-        eprintln!("[wiki/agentic]   → 0 new results");
+        tracing::debug!("[wiki/agentic] 0 new results");
         return "No new results found for this query.".to_string();
     }
 
     let start_idx = rc.returned_chunks.len();
-    eprintln!("[wiki/agentic]   → {} new results (C{}–C{})", new_results.len(), start_idx + 1, start_idx + new_results.len());
+    tracing::debug!(count = new_results.len(), range_start = start_idx + 1, range_end = start_idx + new_results.len(), "[wiki/agentic] new results");
     let mut output = String::new();
 
     for (i, chunk) in new_results.into_iter().enumerate() {
@@ -247,7 +247,7 @@ fn handle_select(rc: &mut ResearchContext, args: &serde_json::Value, max_source_
         return "Error: chunk_ids must not be empty".to_string();
     }
 
-    eprintln!("[wiki/agentic] select({})", chunk_ids.join(", "));
+    tracing::debug!(chunk_ids = %chunk_ids.join(", "), "[wiki/agentic] select");
 
     let mut newly_selected = 0;
     let mut errors = Vec::new();
@@ -321,12 +321,12 @@ async fn run_research(
     let provider = get_llm_provider(provider_config).map_err(|e| e.to_string())?;
 
     for iteration in 0..MAX_RESEARCH_ITERATIONS {
-        eprintln!(
-            "[wiki/agentic] Research iteration {}/{} ({} selected, ~{} tokens)",
-            iteration + 1,
-            MAX_RESEARCH_ITERATIONS,
-            rc.selected_indices.len(),
-            rc.selected_tokens
+        tracing::debug!(
+            iteration = iteration + 1,
+            max_iterations = MAX_RESEARCH_ITERATIONS,
+            selected = rc.selected_indices.len(),
+            tokens = rc.selected_tokens,
+            "[wiki/agentic] Research iteration"
         );
 
         let response: CompletionResponse = provider
@@ -340,7 +340,7 @@ async fn run_research(
             _ => {
                 // No tool calls — agent is done (or just sent text)
                 if !response.content.is_empty() {
-                    eprintln!("[wiki/agentic] Agent sent text without tools, ending research");
+                    tracing::debug!("[wiki/agentic] Agent sent text without tools, ending research");
                 }
                 break;
             }
@@ -383,15 +383,15 @@ async fn run_research(
         }
 
         if research_done {
-            eprintln!("[wiki/agentic] Agent called done, ending research");
+            tracing::debug!("[wiki/agentic] Agent called done, ending research");
             break;
         }
 
         // Safety: stop if selected tokens exceed budget
         if rc.selected_tokens > max_source_tokens * 2 {
-            eprintln!(
-                "[wiki/agentic] Selected tokens ({}) far exceed budget, stopping research",
-                rc.selected_tokens
+            tracing::warn!(
+                selected_tokens = rc.selected_tokens,
+                "[wiki/agentic] Selected tokens far exceed budget, stopping research"
             );
             break;
         }
@@ -466,7 +466,7 @@ pub(crate) async fn generate(
     ctx: &WikiStrategyContext,
 ) -> Result<WikiArticleWithCitations, String> {
     let max_tokens = ctx.max_source_tokens();
-    eprintln!("[wiki/agentic] Starting agentic research for \"{}\" (budget {} tokens)...", ctx.tag_name, max_tokens);
+    tracing::info!(tag_name = %ctx.tag_name, budget_tokens = max_tokens, "[wiki/agentic] Starting agentic research");
 
     // Get scope tag IDs and atom count
     let scope_tag_ids = ctx.storage.get_tag_hierarchy_impl(&ctx.tag_id)
@@ -495,10 +495,10 @@ pub(crate) async fn generate(
     .await?;
 
     let raw_chunks = rc.selected_chunks();
-    eprintln!(
-        "[wiki/agentic] Research complete: {} chunks selected (~{} tokens)",
-        raw_chunks.len(),
-        rc.selected_tokens
+    tracing::info!(
+        chunks = raw_chunks.len(),
+        tokens = rc.selected_tokens,
+        "[wiki/agentic] Research complete"
     );
 
     if raw_chunks.is_empty() {
@@ -507,14 +507,14 @@ pub(crate) async fn generate(
 
     let chunks = trim_to_budget(raw_chunks, max_tokens);
     if chunks.len() < rc.selected_indices.len() {
-        eprintln!(
-            "[wiki/agentic] Trimmed to {} chunks to fit token budget",
-            chunks.len()
+        tracing::info!(
+            chunks = chunks.len(),
+            "[wiki/agentic] Trimmed to fit token budget"
         );
     }
 
     // Synthesize article from selected chunks
-    eprintln!("[wiki/agentic] Synthesizing article...");
+    tracing::info!("[wiki/agentic] Synthesizing article...");
     synthesize_article(
         &ctx.provider_config,
         &ctx.tag_id,
@@ -534,7 +534,7 @@ pub(crate) async fn update(
     existing: &WikiArticleWithCitations,
 ) -> Result<Option<WikiArticleWithCitations>, String> {
     let max_tokens = ctx.max_source_tokens();
-    eprintln!("[wiki/agentic] Starting agentic update for \"{}\" (budget {} tokens)...", ctx.tag_name, max_tokens);
+    tracing::info!(tag_name = %ctx.tag_name, budget_tokens = max_tokens, "[wiki/agentic] Starting agentic update");
 
     let scope_tag_ids = ctx.storage.get_tag_hierarchy_impl(&ctx.tag_id)
         .map_err(|e| e.to_string())?;
@@ -557,26 +557,26 @@ pub(crate) async fn update(
     .await?;
 
     let raw_chunks = rc.selected_chunks();
-    eprintln!(
-        "[wiki/agentic] Update research complete: {} chunks selected (~{} tokens)",
-        raw_chunks.len(),
-        rc.selected_tokens
+    tracing::info!(
+        chunks = raw_chunks.len(),
+        tokens = rc.selected_tokens,
+        "[wiki/agentic] Update research complete"
     );
 
     if raw_chunks.is_empty() {
-        eprintln!("[wiki/agentic] No chunks selected, no update needed");
+        tracing::info!("[wiki/agentic] No chunks selected, no update needed");
         return Ok(None);
     }
 
     let chunks = trim_to_budget(raw_chunks, max_tokens);
     if chunks.len() < rc.selected_indices.len() {
-        eprintln!(
-            "[wiki/agentic] Trimmed to {} chunks to fit token budget",
-            chunks.len()
+        tracing::info!(
+            chunks = chunks.len(),
+            "[wiki/agentic] Trimmed to fit token budget"
         );
     }
 
-    eprintln!("[wiki/agentic] Synthesizing updated article...");
+    tracing::info!("[wiki/agentic] Synthesizing updated article...");
     let result = synthesize_article(
         &ctx.provider_config,
         &ctx.tag_id,

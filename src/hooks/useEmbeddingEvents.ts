@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import { getTransport } from '../lib/transport';
 import { useAtomsStore } from '../stores/atoms';
 import { useTagsStore } from '../stores/tags';
@@ -63,6 +64,10 @@ export function useEmbeddingEvents() {
     // Listen for embedding-complete events (fast, embedding only)
     // Batch these: collect status updates and flush every STATUS_BATCH_MS
     const unsubEmbeddingComplete = transport.subscribe<EmbeddingCompletePayload>('embedding-complete', (payload) => {
+      if (payload.status === 'failed') {
+        toast.error('Embedding failed', { id: 'embedding-failure', description: payload.error });
+      }
+
       pendingStatusUpdates.current.push({
         atomId: payload.atom_id,
         status: payload.status,
@@ -83,6 +88,7 @@ export function useEmbeddingEvents() {
     const unsubTaggingComplete = transport.subscribe<TaggingCompletePayload>('tagging-complete', (payload) => {
       if (payload.status === 'failed') {
         console.error(`Tagging failed for atom ${payload.atom_id}:`, payload.error);
+        toast.error('Tagging failed', { id: 'tagging-failure', description: payload.error });
       }
 
       // If new tags were created, we need to refresh the tag tree
@@ -115,6 +121,19 @@ export function useEmbeddingEvents() {
       }, DEBOUNCE_MS);
     });
 
+    // Listen for ingestion failure events
+    const unsubIngestionFailed = transport.subscribe<{ request_id: string; url: string; error: string }>('ingestion-failed', (payload) => {
+      toast.error('Ingestion failed', { id: `ingestion-failed-${payload.request_id}`, description: `${payload.url}: ${payload.error}` });
+    });
+
+    const unsubIngestionFetchFailed = transport.subscribe<{ url: string; request_id: string; error: string }>('ingestion-fetch-failed', (payload) => {
+      toast.error('Failed to fetch URL', { id: `fetch-failed-${payload.request_id}`, description: `${payload.url}: ${payload.error}` });
+    });
+
+    const unsubFeedPollFailed = transport.subscribe<{ feed_id: string; error: string }>('feed-poll-failed', (payload) => {
+      toast.error('Feed poll failed', { id: `feed-poll-failed-${payload.feed_id}`, description: payload.error });
+    });
+
     // Listen for embeddings-reset events (provider/model change triggers re-embedding)
     const unsubEmbeddingsReset = transport.subscribe<EmbeddingsResetPayload>('embeddings-reset', (payload) => {
       console.log('Embeddings reset event:', payload);
@@ -132,6 +151,9 @@ export function useEmbeddingEvents() {
       unsubIngestionComplete();
       unsubEmbeddingComplete();
       unsubTaggingComplete();
+      unsubIngestionFailed();
+      unsubIngestionFetchFailed();
+      unsubFeedPollFailed();
       unsubEmbeddingsReset();
     };
   }, []); // Empty deps - only run once on mount

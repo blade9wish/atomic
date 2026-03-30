@@ -1,9 +1,16 @@
 import type { Transport, HttpTransportConfig } from './types';
 import { HttpTransport } from './http';
+import { useUIStore } from '../../stores/ui';
 export type { Transport, HttpTransportConfig };
 
 let activeTransport: Transport | null = null;
 let localServerConfig: HttpTransportConfig | null = null;
+
+function wireConnectionCallback(transport: Transport): void {
+  (transport as HttpTransport).onConnectionChange = (connected) => {
+    useUIStore.getState().setServerConnected(connected);
+  };
+}
 
 export function getTransport(): Transport {
   if (!activeTransport) throw new Error('Transport not initialized. Call initTransport() first.');
@@ -21,6 +28,7 @@ export async function initTransport(): Promise<void> {
     const config = saved ? JSON.parse(saved) as HttpTransportConfig : localServerConfig;
 
     activeTransport = new HttpTransport(config);
+    wireConnectionCallback(activeTransport);
     await activeTransport.connect();
   } else {
     // Web SPA — require explicit config from localStorage or prompt user
@@ -28,6 +36,7 @@ export async function initTransport(): Promise<void> {
     if (saved) {
       const config: HttpTransportConfig = JSON.parse(saved);
       activeTransport = new HttpTransport(config);
+      wireConnectionCallback(activeTransport);
       await activeTransport.connect();
     } else {
       // Create a disconnected HttpTransport — user must configure via settings
@@ -40,6 +49,7 @@ export async function initTransport(): Promise<void> {
 export async function switchTransport(config: HttpTransportConfig): Promise<void> {
   if (activeTransport) activeTransport.disconnect();
   activeTransport = new HttpTransport(config);
+  wireConnectionCallback(activeTransport);
   await activeTransport.connect();
   localStorage.setItem('atomic-server-config', JSON.stringify(config));
 }
@@ -51,6 +61,7 @@ export async function switchToLocal(): Promise<void> {
   }
   if (activeTransport) activeTransport.disconnect();
   activeTransport = new HttpTransport(localServerConfig);
+  wireConnectionCallback(activeTransport);
   await activeTransport.connect();
   localStorage.removeItem('atomic-server-config');
 }

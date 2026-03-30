@@ -10,6 +10,7 @@ pub mod embedding;
 pub mod feeds;
 pub mod graph;
 pub mod import;
+pub mod logs;
 pub mod ingest;
 pub mod oauth;
 pub mod ollama;
@@ -231,4 +232,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/feeds/{id}", web::put().to(feeds::update_feed));
     cfg.route("/feeds/{id}", web::delete().to(feeds::delete_feed));
     cfg.route("/feeds/{id}/poll", web::post().to(feeds::poll_feed));
+
+    // Logs
+    cfg.route("/logs", web::get().to(logs::get_logs));
 }

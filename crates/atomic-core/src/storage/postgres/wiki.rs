@@ -477,7 +477,7 @@ impl WikiStore for PostgresStorage {
             chunks
         } else {
             // Fallback: fetch by insertion order
-            eprintln!("[wiki/postgres] No centroid for tag {}, falling back to unranked", tag_id);
+            tracing::debug!(tag_id, "[wiki/postgres] No centroid for tag, falling back to unranked");
             let rows: Vec<(String, i32, String)> = sqlx::query_as(
                 "SELECT DISTINCT ac.atom_id, ac.chunk_index, ac.content
                  FROM atom_chunks ac

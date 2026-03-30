@@ -157,7 +157,7 @@ impl AtomicCore {
             for category in &["Topics", "People", "Locations", "Organizations", "Events"] {
                 storage.create_tag_impl(category, None)?;
             }
-            eprintln!("Seeded default category tags in Postgres");
+            tracing::info!("Seeded default category tags in Postgres");
         }
 
         // Seed default settings if no registry and settings table is empty.
@@ -168,7 +168,7 @@ impl AtomicCore {
                 for (key, value) in settings::DEFAULT_SETTINGS {
                     storage.set_setting_sync(key, value)?;
                 }
-                eprintln!("Seeded default settings in Postgres");
+                tracing::info!("Seeded default settings in Postgres");
             }
         }
 
@@ -240,9 +240,10 @@ impl AtomicCore {
                         .unwrap_or(1536);
 
                     if current_dim != expected_dim {
-                        eprintln!(
-                            "Reconciling vec_chunks dimension: {} -> {} for configured embedding model",
-                            current_dim, expected_dim
+                        tracing::info!(
+                            current_dim,
+                            expected_dim,
+                            "Reconciling vec_chunks dimension for configured embedding model"
                         );
                         db::recreate_vec_chunks_with_dimension(&conn, expected_dim)?;
                     }
@@ -284,10 +285,10 @@ impl AtomicCore {
                     .map_err(|e| AtomicCoreError::Database(e))?;
 
                 if !tag_ids.is_empty() {
-                    eprintln!("Backfilling tag centroid embeddings for {} tags...", tag_ids.len());
+                    tracing::info!(count = tag_ids.len(), "Backfilling tag centroid embeddings");
                     embedding::compute_tag_embeddings_batch(&conn, &tag_ids)
                         .map_err(|e| AtomicCoreError::Embedding(e))?;
-                    eprintln!("Tag centroid backfill complete.");
+                    tracing::info!("Tag centroid backfill complete");
                 }
             }
         }
@@ -762,7 +763,7 @@ impl AtomicCore {
             .filter(|t| t.has_article)
             .map(|t| (t.tag_id, t.tag_name))
             .collect();
-        eprintln!("[wiki] Strategy: {:?}, model: {}, cross-link articles: {}", strategy, model, linkable_article_names.len());
+        tracing::info!(strategy = ?strategy, model, cross_link_articles = linkable_article_names.len(), "[wiki] Configuration");
 
         let ctx = wiki::WikiStrategyContext {
             storage: self.storage.clone(),
@@ -781,7 +782,7 @@ impl AtomicCore {
         tag_id: &str,
         tag_name: &str,
     ) -> Result<WikiArticleWithCitations, AtomicCoreError> {
-        eprintln!("[wiki] === Generating article for '{}' (tag_id={}) ===", tag_name, tag_id);
+        tracing::info!(tag_name, tag_id, "[wiki] Generating article");
 
         let (strategy, ctx) = self.build_wiki_strategy_context(tag_id, tag_name)?;
 
@@ -795,12 +796,12 @@ impl AtomicCore {
             &result.article.content,
             &ctx.linkable_article_names,
         );
-        eprintln!("[wiki] Extracted {} wiki links, {} citations", wiki_links.len(), result.citations.len());
+        tracing::info!(wiki_links = wiki_links.len(), citations = result.citations.len(), "[wiki] Extracted links and citations");
 
         // Save to database
         self.storage.save_wiki_with_links_sync(&result.article, &result.citations, &wiki_links)?;
 
-        eprintln!("[wiki] === Article saved successfully ===");
+        tracing::info!("[wiki] Article saved successfully");
         Ok(result)
     }
 
@@ -810,7 +811,7 @@ impl AtomicCore {
         tag_id: &str,
         tag_name: &str,
     ) -> Result<WikiArticleWithCitations, AtomicCoreError> {
-        eprintln!("[wiki] === Updating article for '{}' (tag_id={}) ===", tag_name, tag_id);
+        tracing::info!(tag_name, tag_id, "[wiki] Updating article");
 
         let existing = self.get_wiki(tag_id)?
             .ok_or_else(|| AtomicCoreError::Wiki("No existing article to update".to_string()))?;
@@ -837,7 +838,7 @@ impl AtomicCore {
         // Save to database
         self.storage.save_wiki_with_links_sync(&result.article, &result.citations, &wiki_links)?;
 
-        eprintln!("[wiki] === Article updated successfully ===");
+        tracing::info!("[wiki] Article updated successfully");
         Ok(result)
     }
 
@@ -1223,9 +1224,11 @@ impl AtomicCore {
             let new_dim = new_config.embedding_dimension();
 
             if current_dim != new_dim {
-                eprintln!(
-                    "Embedding dimension changing from {} to {} due to {} change - recreating vec_chunks",
-                    current_dim, new_dim, key
+                tracing::info!(
+                    current_dim,
+                    new_dim,
+                    key,
+                    "Embedding dimension changing due to setting change - recreating vec_chunks"
                 );
                 self.storage.recreate_vector_index_sync(new_dim)?;
                 dimension_changed = true;
@@ -1390,7 +1393,7 @@ impl AtomicCore {
             ) {
                 Ok(n) => n,
                 Err(e) => {
-                    eprintln!("Error parsing {}: {}", relative_str, e);
+                    tracing::error!(file = %relative_str, error = %e, "Error parsing file");
                     stats.errors += 1;
                     on_progress(ImportProgress {
                         current: index as i32 + 1,
@@ -1442,7 +1445,7 @@ impl AtomicCore {
                     imported_atoms.push((atom_id.clone(), note.content.clone()));
                 }
                 Err(e) => {
-                    eprintln!("Error inserting atom for {}: {}", relative_str, e);
+                    tracing::error!(file = %relative_str, error = %e, "Error inserting atom");
                     stats.errors += 1;
                     on_progress(ImportProgress {
                         current: index as i32 + 1,
@@ -1483,7 +1486,7 @@ impl AtomicCore {
                         "INSERT OR IGNORE INTO atom_tags (atom_id, tag_id) VALUES (?1, ?2)",
                         rusqlite::params![&atom_id, &tag_id],
                     ) {
-                        eprintln!("Error linking folder tag '{}' to atom: {}", htag.name, e);
+                        tracing::error!(tag_name = %htag.name, error = %e, "Error linking folder tag to atom");
                         continue;
                     }
                     stats.tags_linked += 1;
@@ -1499,7 +1502,7 @@ impl AtomicCore {
                         "INSERT OR IGNORE INTO atom_tags (atom_id, tag_id) VALUES (?1, ?2)",
                         rusqlite::params![&atom_id, &tag_id],
                     ) {
-                        eprintln!("Error linking tag '{}' to atom: {}", tag_name, e);
+                        tracing::error!(tag_name = %tag_name, error = %e, "Error linking tag to atom");
                         continue;
                     }
                     stats.tags_linked += 1;
@@ -1844,7 +1847,7 @@ impl AtomicCore {
             match self.poll_feed(&feed_id, on_ingest.clone(), on_embed.clone()).await {
                 Ok(r) => results.push(r),
                 Err(e) => {
-                    eprintln!("Feed poll failed for {}: {}", feed_id, e);
+                    tracing::error!(feed_id = %feed_id, error = %e, "Feed poll failed");
                 }
             }
         }
@@ -1923,7 +1926,7 @@ fn get_or_create_tag(
                 "INSERT INTO tags (id, name, parent_id, created_at) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params![&new_id, name, parent_id, &now],
             ) {
-                eprintln!("Error creating tag '{}': {}", name, e);
+                tracing::error!(tag_name = %name, error = %e, "Error creating tag");
                 return None;
             }
             stats.tags_created += 1;

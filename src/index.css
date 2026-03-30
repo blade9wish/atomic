@@ -168,6 +168,38 @@ body {
   overflow: hidden;
 }
 
+/* Toast styling (sonner) */
+[data-sonner-toaster] {
+  --normal-bg: var(--color-bg-card);
+  --normal-border: var(--color-border);
+  --normal-text: var(--color-text-primary);
+  --success-bg: rgba(var(--color-success-rgb), 0.1);
+  --success-border: rgba(var(--color-success-rgb), 0.3);
+  --success-text: var(--color-success);
+  --error-bg: rgba(239, 68, 68, 0.1);
+  --error-border: rgba(239, 68, 68, 0.3);
+  --error-text: #ef4444;
+  z-index: 50 !important;
+  font-family: inherit !important;
+}
+
+[data-sonner-toast] {
+  border-radius: 8px !important;
+  font-family: inherit !important;
+}
+
+[data-sonner-toast][data-type="error"] {
+  background: var(--error-bg) !important;
+  border-color: var(--error-border) !important;
+  color: var(--error-text) !important;
+}
+
+[data-sonner-toast][data-type="success"] {
+  background: var(--success-bg) !important;
+  border-color: var(--success-border) !important;
+  color: var(--success-text) !important;
+}
+
 /* Prevent text selection during drag operations */
 .no-select {
   user-select: none;

@@ -234,9 +234,7 @@ pub async fn extract_tags_from_content(
             Ok(response) => {
                 let response_content = &response.content;
                 if !response_content.is_empty() {
-                    eprintln!("=== TAG EXTRACTION LLM OUTPUT ===");
-                    eprintln!("{}", response_content);
-                    eprintln!("=================================");
+                    tracing::debug!(output = %response_content, "TAG EXTRACTION LLM OUTPUT");
 
                     let result: ExtractionResult = serde_json::from_str(response_content).map_err(|e| {
                         format!(
@@ -250,14 +248,12 @@ pub async fn extract_tags_from_content(
             }
             Err(e) => {
                 let err_str = e.to_string();
-                eprintln!("=== TAG EXTRACTION LLM ERROR (attempt {}/{}) ===", attempt + 1, 3);
-                eprintln!("Error: {}", err_str);
-                eprintln!("================================================");
-                
                 if e.is_retryable() {
+                    tracing::warn!(attempt = attempt + 1, max_attempts = 3, model = %model, error = %err_str, "Tag extraction LLM call failed (retryable)");
                     last_error = err_str;
                     continue;
                 } else {
+                    tracing::error!(model = %model, error = %err_str, "Tag extraction LLM call failed (non-retryable)");
                     last_error = err_str;
                     break;
                 }
@@ -335,10 +331,7 @@ pub async fn extract_tags_from_chunk(
             Ok(response) => {
                 let content = &response.content;
                 if !content.is_empty() {
-                    // Log the raw LLM output
-                    eprintln!("=== TAG EXTRACTION LLM OUTPUT ===");
-                    eprintln!("{}", content);
-                    eprintln!("=================================");
+                    tracing::debug!(output = %content, "TAG EXTRACTION LLM OUTPUT");
 
                     // Parse the extraction result from the content
                     let result: ExtractionResult = serde_json::from_str(content).map_err(|e| {
@@ -353,14 +346,12 @@ pub async fn extract_tags_from_chunk(
             }
             Err(e) => {
                 let err_str = e.to_string();
-                eprintln!("=== TAG EXTRACTION LLM ERROR (attempt {}/{}) ===", attempt + 1, 3);
-                eprintln!("Error: {}", err_str);
-                eprintln!("================================================");
-                
                 if e.is_retryable() {
+                    tracing::warn!(attempt = attempt + 1, max_attempts = 3, model = %model, error = %err_str, "Tag extraction (chunk) LLM call failed (retryable)");
                     last_error = err_str;
                     continue;
                 } else {
+                    tracing::error!(model = %model, error = %err_str, "Tag extraction (chunk) LLM call failed (non-retryable)");
                     // Don't retry on non-retryable errors
                     last_error = err_str;
                     break;
@@ -597,7 +588,7 @@ pub fn cleanup_orphaned_parents(conn: &Connection, tag_id: &str) -> Result<(), S
 
         // If parent is unused and has no wiki, delete it and recurse
         if child_count == 0 && atom_count == 0 && !has_wiki {
-            eprintln!("Cleaning up orphaned parent tag: {}", parent);
+            tracing::debug!(parent = %parent, "Cleaning up orphaned parent tag");
             conn.execute("DELETE FROM tags WHERE id = ?1", [&parent])
                 .map_err(|e| format!("Failed to delete orphaned parent: {}", e))?;
             cleanup_orphaned_parents(conn, &parent)?; // Recurse to grandparent
@@ -625,7 +616,7 @@ pub fn build_tag_info_for_consolidation(
                 current_tags_info.push_str(&format!("- {}\n", name));
             }
             Err(e) => {
-                eprintln!("Warning: Failed to get tag info for {}: {}", tag_id, e);
+                tracing::warn!(tag_id, error = %e, "Failed to get tag info");
                 continue;
             }
         }
@@ -708,10 +699,7 @@ pub async fn consolidate_atom_tags(
             Ok(response) => {
                 let content = &response.content;
                 if !content.is_empty() {
-                    // Log the raw LLM output
-                    eprintln!("=== TAG CONSOLIDATION LLM OUTPUT ===");
-                    eprintln!("{}", content);
-                    eprintln!("====================================");
+                    tracing::debug!(output = %content, "TAG CONSOLIDATION LLM OUTPUT");
 
                     // Parse the consolidation result from the content
                     let result: TagConsolidationResult =
@@ -727,14 +715,12 @@ pub async fn consolidate_atom_tags(
             }
             Err(e) => {
                 let err_str = e.to_string();
-                eprintln!("=== TAG CONSOLIDATION LLM ERROR (attempt {}/{}) ===", attempt + 1, 3);
-                eprintln!("Error: {}", err_str);
-                eprintln!("======================================================");
-                
                 if e.is_retryable() {
+                    tracing::warn!(attempt = attempt + 1, max_attempts = 3, model = %model, error = %err_str, "Tag consolidation LLM call failed (retryable)");
                     last_error = err_str;
                     continue;
                 } else {
+                    tracing::error!(model = %model, error = %err_str, "Tag consolidation LLM call failed (non-retryable)");
                     // Don't retry on non-retryable errors
                     last_error = err_str;
                     break;

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import { getTransport } from '../lib/transport';
 
 export interface Atom {
@@ -289,6 +290,7 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
         };
       });
     } catch (error) {
+      toast.error('Failed to load more atoms', { id: 'atoms-load-more-error', description: String(error) });
       set({ error: String(error), isLoadingMore: false });
     }
   },
@@ -416,6 +418,7 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
 
       set({ semanticSearchResults: results, isSearching: false });
     } catch (error) {
+      toast.error('Search failed', { id: 'atoms-search-error', description: String(error) });
       set({ error: String(error), isSearching: false });
     }
   },
@@ -515,6 +518,7 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
       set({ availableSources: sources });
     } catch (error) {
       console.error('Failed to fetch sources:', error);
+      toast.error('Failed to load sources', { id: 'atoms-sources-error', description: String(error) });
     }
   },
 

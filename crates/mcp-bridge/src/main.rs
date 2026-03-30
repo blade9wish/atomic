@@ -12,6 +12,7 @@ use std::env;
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use tracing;
 
 const DEFAULT_PORT: u16 = 44380;
 const DEFAULT_HOST: &str = "127.0.0.1";
@@ -170,7 +171,7 @@ async fn process_message(
             .get("mcp-session-id")
             .and_then(|v| v.to_str().ok())
         {
-            eprintln!("Got session ID: {}", new_session_id);
+            tracing::debug!(session_id = %new_session_id, "Captured session ID");
             *session_id.lock().unwrap() = Some(new_session_id.to_string());
         }
     }
@@ -222,6 +223,14 @@ async fn process_message(
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "atomic_mcp_bridge=info,warn".parse().unwrap()),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+
     // Parse configuration from environment or args
     let port: u16 = env::var("ATOMIC_PORT")
         .ok()
@@ -231,10 +240,12 @@ async fn main() {
     let host = env::var("ATOMIC_HOST").unwrap_or_else(|_| DEFAULT_HOST.to_string());
     let endpoint = format!("http://{}:{}/mcp", host, port);
 
-    // Log startup to stderr (stdout is reserved for JSON-RPC)
-    eprintln!("Atomic MCP Bridge v{}", env!("CARGO_PKG_VERSION"));
-    eprintln!("Connecting to: {}", endpoint);
-    eprintln!("Protocol version: {}", MCP_PROTOCOL_VERSION);
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        endpoint = %endpoint,
+        protocol_version = MCP_PROTOCOL_VERSION,
+        "Atomic MCP Bridge starting"
+    );
 
     // Session ID storage (assigned by server during initialize)
     let session_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));

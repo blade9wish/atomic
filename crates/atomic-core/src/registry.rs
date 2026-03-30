@@ -306,7 +306,7 @@ impl Registry {
             rusqlite::params!["default", "Default", &now, &now],
         )?;
 
-        eprintln!("Legacy migration complete: atomic.db → databases/default.db");
+        tracing::info!("Legacy migration complete: atomic.db -> databases/default.db");
         Ok(())
     }
 

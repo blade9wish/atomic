@@ -145,7 +145,7 @@ pub(crate) async fn call_llm_for_wiki(
     model: &str,
 ) -> Result<WikiGenerationResult, String> {
     let input_chars = user_content.len();
-    eprintln!("[wiki] Starting generation with model={}, input_chars={}", model, input_chars);
+    tracing::info!(model, input_chars, "[wiki] Starting generation");
 
     let schema = serde_json::json!({
         "type": "object",
@@ -184,7 +184,7 @@ pub(crate) async fn call_llm_for_wiki(
     for attempt in 0..=max_retries {
         if attempt > 0 {
             let delay = 1u64 << attempt;
-            eprintln!("[wiki] Retry attempt {}/{} after {}s delay (last error: {})", attempt, max_retries, delay, last_error);
+            tracing::warn!(attempt, max_retries, delay_secs = delay, last_error = %last_error, "[wiki] Retrying");
             tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
         }
 
@@ -193,17 +193,17 @@ pub(crate) async fn call_llm_for_wiki(
             Ok(response) => {
                 let elapsed = start.elapsed();
                 let content = &response.content;
-                eprintln!("[wiki] LLM responded in {:.1}s, output_chars={}", elapsed.as_secs_f64(), content.len());
+                tracing::info!(elapsed_secs = format_args!("{:.1}", elapsed.as_secs_f64()), output_chars = content.len(), "[wiki] LLM responded");
 
                 if content.is_empty() {
-                    eprintln!("[wiki] ERROR: LLM returned empty content");
+                    tracing::error!("[wiki] LLM returned empty content");
                     return Err("LLM returned empty content".to_string());
                 }
 
                 // Parse the structured JSON response
                 match serde_json::from_str::<WikiGenerationResult>(content) {
                     Ok(result) => {
-                        eprintln!("[wiki] Successfully parsed article ({} chars, {} citations)", result.article_content.len(), result.citations_used.len());
+                        tracing::info!(article_chars = result.article_content.len(), citations = result.citations_used.len(), "[wiki] Successfully parsed article");
                         return Ok(result);
                     }
                     Err(parse_err) => {
@@ -214,24 +214,23 @@ pub(crate) async fn call_llm_for_wiki(
                         } else {
                             content.clone()
                         };
-                        eprintln!("[wiki] ERROR: Failed to parse LLM response as JSON: {}", parse_err);
-                        eprintln!("[wiki] Response preview: {}", preview);
+                        tracing::error!(error = %parse_err, preview = %preview, "[wiki] Failed to parse LLM response as JSON");
                         return Err(format!("Failed to parse wiki result: {}", parse_err));
                     }
                 }
             }
             Err(e) => {
                 let elapsed = start.elapsed();
-                eprintln!("[wiki] LLM call failed after {:.1}s: {}", elapsed.as_secs_f64(), e);
+                tracing::error!(elapsed_secs = format_args!("{:.1}", elapsed.as_secs_f64()), error = %e, "[wiki] LLM call failed");
 
                 if e.is_retryable() && attempt < max_retries {
                     last_error = e.to_string();
                     continue;
                 } else {
                     if !e.is_retryable() {
-                        eprintln!("[wiki] Non-retryable error, giving up immediately");
+                        tracing::error!("[wiki] Non-retryable error, giving up immediately");
                     } else {
-                        eprintln!("[wiki] Max retries exhausted");
+                        tracing::error!("[wiki] Max retries exhausted");
                     }
                     return Err(e.to_string());
                 }

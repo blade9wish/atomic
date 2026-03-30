@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
 import { Button } from '../ui/Button';
 import { CustomSelect } from '../ui/CustomSelect';
 import { SearchableSelect } from '../ui/SearchableSelect';
@@ -32,6 +33,7 @@ import {
   type CreateTokenResponse,
   type Feed,
   reembedAllAtoms,
+  exportLogs,
   type IngestionResult,
   type FeedPollResult,
 } from '../../lib/api';
@@ -424,6 +426,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       fetchTags();
     } catch (e) {
       console.error('Failed to switch to local:', e);
+      toast.error('Failed to switch to local server', { description: String(e) });
     }
   };
 
@@ -435,6 +438,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setApiTokens(tokens);
     } catch (e) {
       console.error('Failed to load API tokens:', e);
+      toast.error('Failed to load API tokens', { description: String(e) });
     } finally {
       setIsLoadingTokens(false);
     }
@@ -453,6 +457,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       await loadApiTokens();
     } catch (e) {
       console.error('Failed to create token:', e);
+      toast.error('Failed to create API token', { description: String(e) });
     } finally {
       setIsCreatingToken(false);
     }
@@ -477,6 +482,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       await loadApiTokens();
     } catch (e) {
       console.error('Failed to revoke token:', e);
+      toast.error('Failed to revoke token', { description: String(e) });
     } finally {
       setConfirmRevokeId(null);
     }
@@ -491,6 +497,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setFeeds(result);
     } catch (e) {
       console.error('Failed to load feeds:', e);
+      toast.error('Failed to load feeds', { description: String(e) });
       setFeedError(String(e));
     } finally {
       setFeedsLoading(false);
@@ -615,7 +622,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         setIsLoadingModels(true);
         getAvailableLlmModels()
           .then(models => setAvailableModels(models))
-          .catch(err => console.error('Failed to load models:', err))
+          .catch(err => { console.error('Failed to load models:', err); toast.error('Failed to load models', { description: String(err) }); })
           .finally(() => setIsLoadingModels(false));
       }
       // Load API tokens when connected to a non-local server
@@ -956,6 +963,37 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         }`}
                       />
                     </button>
+                  </div>
+
+                  {/* Troubleshooting */}
+                  <div className="space-y-2 pt-4 border-t border-[var(--color-border)]">
+                    <label className="block text-sm font-medium text-[var(--color-text-primary)]">
+                      Troubleshooting
+                    </label>
+                    <p className="text-xs text-[var(--color-text-secondary)]">
+                      Export recent server logs to help diagnose issues
+                    </p>
+                    <Button
+                      onClick={async () => {
+                        try {
+                          const logs = await exportLogs();
+                          const date = new Date().toISOString().split('T')[0];
+                          const blob = new Blob([logs], { type: 'text/plain' });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `atomic-logs-${date}.txt`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                          toast.success('Logs exported');
+                        } catch (e) {
+                          toast.error('Failed to export logs', { description: String(e) });
+                        }
+                      }}
+                      variant="secondary"
+                    >
+                      Export Logs
+                    </Button>
                   </div>
                 </>
               )}

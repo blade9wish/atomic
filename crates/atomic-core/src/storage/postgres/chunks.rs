@@ -195,18 +195,19 @@ impl ChunkStore for PostgresStorage {
                 Ok(edge_count) => {
                     total_edges += edge_count;
                     if (idx + 1) % 50 == 0 {
-                        eprintln!(
-                            "Processed {}/{} atoms, {} edges so far",
-                            idx + 1,
-                            atom_ids.len(),
-                            total_edges
+                        tracing::info!(
+                            progress = idx + 1,
+                            total = atom_ids.len(),
+                            total_edges,
+                            "Edge computation progress"
                         );
                     }
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to compute edges for atom {}: {}",
-                        atom_id, e
+                    tracing::warn!(
+                        atom_id = %atom_id,
+                        error = %e,
+                        "Failed to compute edges for atom"
                     );
                 }
             }
@@ -651,7 +652,7 @@ impl ChunkStore for PostgresStorage {
 
         let tag_ids: Vec<String> = tag_ids.into_iter().map(|(id,)| id).collect();
         let count = tag_ids.len() as i32;
-        eprintln!("Recomputing centroid embeddings for {} tags...", count);
+        tracing::info!(count, "Recomputing centroid embeddings for tags");
 
         for tag_id in &tag_ids {
             // Get all descendant tag IDs (recursive CTE)
@@ -733,7 +734,7 @@ impl ChunkStore for PostgresStorage {
             self.save_tag_centroid(tag_id, &centroid).await?;
         }
 
-        eprintln!("Tag centroid embeddings recomputed for {} tags", count);
+        tracing::info!(count, "Tag centroid embeddings recomputed");
         Ok(count)
     }
 

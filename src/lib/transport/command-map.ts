@@ -544,4 +544,10 @@ export const COMMAND_MAP: Record<string, CommandSpec> = {
     method: 'GET',
     path: (a) => `/api/databases/${encodeURIComponent(a.id as string)}/stats`,
   },
+
+  // ==================== Logs ====================
+  get_logs: {
+    method: 'GET',
+    path: '/api/logs',
+  },
 };

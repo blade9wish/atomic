@@ -288,14 +288,20 @@ async fn complete_internal(
 
     if !response.status().is_success() {
         let status = response.status().as_u16();
+        let retry_after = response.headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
         let body = response.text().await.unwrap_or_default();
 
         if status == 429 {
+            tracing::warn!(status, retry_after, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 200), "OpenAI-compat LLM rate limited");
             return Err(ProviderError::RateLimited {
-                retry_after_secs: None,
+                retry_after_secs: retry_after,
             });
         }
 
+        tracing::error!(status, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 500), "OpenAI-compat LLM API error");
         return Err(ProviderError::Api {
             status,
             message: body,
@@ -306,8 +312,7 @@ async fn complete_internal(
 
     let chat_response: ChatResponse = serde_json::from_str(&body)
         .map_err(|e| {
-            eprintln!("OpenAI-compat LLM parse error: {e}");
-            eprintln!("Response body (first 500 chars): {}", &body[..body.len().min(500)]);
+            tracing::error!(error = %e, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 500), "OpenAI-compat LLM parse error");
             ProviderError::ParseError(format!("Failed to parse chat response: {e}"))
         })?;
 
@@ -369,14 +374,20 @@ pub async fn complete_streaming_with_tools(
 
     if !response.status().is_success() {
         let status = response.status().as_u16();
+        let retry_after = response.headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
         let body = response.text().await.unwrap_or_default();
 
         if status == 429 {
+            tracing::warn!(status, retry_after, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 200), "OpenAI-compat streaming LLM rate limited");
             return Err(ProviderError::RateLimited {
-                retry_after_secs: None,
+                retry_after_secs: retry_after,
             });
         }
 
+        tracing::error!(status, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 500), "OpenAI-compat streaming LLM API error");
         return Err(ProviderError::Api {
             status,
             message: body,
@@ -413,7 +424,11 @@ pub async fn complete_streaming_with_tools(
             }
 
             if let Some(json_str) = line.strip_prefix("data: ") {
-                if let Ok(response) = serde_json::from_str::<StreamingResponse>(json_str) {
+                match serde_json::from_str::<StreamingResponse>(json_str) {
+                Err(e) => {
+                    tracing::debug!(error = %e, chunk_preview = %crate::providers::error::truncate_utf8(json_str, 200), "OpenAI-compat stream chunk parse error");
+                }
+                Ok(response) => {
                     if let Some(choice) = response.choices.first() {
                         if choice.finish_reason.is_some() {
                             finish_reason = choice.finish_reason.clone();
@@ -468,6 +483,7 @@ pub async fn complete_streaming_with_tools(
                             }
                         }
                     }
+                }
                 }
             }
         }

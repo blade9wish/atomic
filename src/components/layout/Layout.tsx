@@ -3,6 +3,7 @@ import { LeftPanel } from './LeftPanel';
 import { MainView } from './MainView';
 import { RightDrawer } from './RightDrawer';
 import { LoadingIndicator } from '../ui/LoadingIndicator';
+import { ServerConnectionStatus } from '../ui/ServerConnectionStatus';
 import { SettingsModal } from '../settings/SettingsModal';
 import { OnboardingWizard } from '../onboarding';
 import { CommandPalette } from '../command-palette';
@@ -143,6 +144,7 @@ export function Layout() {
       <MainView />
       <RightDrawer />
       <LoadingIndicator />
+      <ServerConnectionStatus />
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={closeCommandPalette}

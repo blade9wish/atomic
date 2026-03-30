@@ -324,21 +324,32 @@ async fn complete_internal(
 
     if !response.status().is_success() {
         let status = response.status().as_u16();
+        let retry_after = response.headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
         let body = response.text().await.unwrap_or_default();
 
         if status == 429 {
+            tracing::warn!(status, retry_after, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 200), "OpenRouter LLM rate limited");
             return Err(ProviderError::RateLimited {
-                retry_after_secs: None,
+                retry_after_secs: retry_after,
             });
         }
 
+        tracing::error!(status, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 500), "OpenRouter LLM API error");
         return Err(ProviderError::Api {
             status,
             message: body,
         });
     }
 
-    let chat_response: ChatResponse = response.json().await?;
+    let body = response.text().await?;
+    let chat_response: ChatResponse = serde_json::from_str(&body)
+        .map_err(|e| {
+            tracing::error!(error = %e, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 500), "OpenRouter LLM parse error");
+            ProviderError::ParseError(format!("Failed to parse chat response: {e}"))
+        })?;
 
     let choice = chat_response
         .choices
@@ -418,14 +429,20 @@ async fn complete_streaming_internal(
 
     if !response.status().is_success() {
         let status = response.status().as_u16();
+        let retry_after = response.headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
         let body = response.text().await.unwrap_or_default();
 
         if status == 429 {
+            tracing::warn!(status, retry_after, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 200), "OpenRouter streaming LLM rate limited");
             return Err(ProviderError::RateLimited {
-                retry_after_secs: None,
+                retry_after_secs: retry_after,
             });
         }
 
+        tracing::error!(status, model = %config.model, body_preview = %crate::providers::error::truncate_utf8(&body, 500), "OpenRouter streaming LLM API error");
         return Err(ProviderError::Api {
             status,
             message: body,
@@ -465,7 +482,11 @@ async fn complete_streaming_internal(
 
             // Parse SSE data line
             if let Some(json_str) = line.strip_prefix("data: ") {
-                if let Ok(response) = serde_json::from_str::<StreamingResponse>(json_str) {
+                match serde_json::from_str::<StreamingResponse>(json_str) {
+                Err(e) => {
+                    tracing::debug!(error = %e, chunk_preview = %crate::providers::error::truncate_utf8(json_str, 200), "OpenRouter stream chunk parse error");
+                }
+                Ok(response) => {
                     if let Some(choice) = response.choices.first() {
                         // Update finish reason
                         if choice.finish_reason.is_some() {
@@ -524,6 +545,7 @@ async fn complete_streaming_internal(
                             }
                         }
                     }
+                }
                 }
             }
         }

@@ -39,7 +39,7 @@ pub(crate) async fn generate(
     ctx: &WikiStrategyContext,
 ) -> Result<WikiArticleWithCitations, String> {
     let max_tokens = ctx.max_source_tokens();
-    eprintln!("[wiki/centroid] Preparing sources (centroid similarity, budget {} tokens)...", max_tokens);
+    tracing::info!(budget_tokens = max_tokens, "[wiki/centroid] Preparing sources (centroid similarity)");
 
     let (chunks, atom_count) = ctx.storage.get_wiki_source_chunks_sync(&ctx.tag_id, max_tokens)
         .map_err(|e| e.to_string())?;
@@ -51,9 +51,9 @@ pub(crate) async fn generate(
         tag_name: ctx.tag_name.clone(),
     };
 
-    eprintln!("[wiki/centroid] Found {} chunks from {} atoms", input.chunks.len(), input.atom_count);
+    tracing::info!(chunks = input.chunks.len(), atoms = input.atom_count, "[wiki/centroid] Found chunks");
 
-    eprintln!("[wiki/centroid] Calling LLM...");
+    tracing::info!("[wiki/centroid] Calling LLM...");
     let result = generate_wiki_content(
         &ctx.provider_config,
         &input,
@@ -83,9 +83,9 @@ pub(crate) async fn update(
         None => return Ok(None),
     };
 
-    eprintln!(
-        "[wiki/centroid] Update: {} new chunks",
-        new_chunks.len()
+    tracing::info!(
+        new_chunks = new_chunks.len(),
+        "[wiki/centroid] Update"
     );
 
     let input = WikiUpdateInput {
@@ -160,9 +160,10 @@ pub(crate) fn select_chunks_by_centroid(
         }
     }
 
-    eprintln!(
-        "[wiki/centroid] Selected {} chunks ({} tokens) by centroid similarity",
-        chunks.len(), total_tokens
+    tracing::info!(
+        chunks = chunks.len(),
+        tokens = total_tokens,
+        "[wiki/centroid] Selected chunks by centroid similarity"
     );
 
     Ok(chunks)
@@ -208,9 +209,10 @@ pub(crate) fn select_chunks_unranked(
         });
     }
 
-    eprintln!(
-        "[wiki/centroid] Selected {} chunks ({} tokens) by insertion order (no centroid)",
-        chunks.len(), total_tokens
+    tracing::info!(
+        chunks = chunks.len(),
+        tokens = total_tokens,
+        "[wiki/centroid] Selected chunks by insertion order (no centroid)"
     );
 
     Ok(chunks)
@@ -276,9 +278,10 @@ pub(crate) fn select_new_chunks_unranked(
         });
     }
 
-    eprintln!(
-        "[wiki/centroid] Selected {} new chunks ({} tokens) by insertion order (no centroid)",
-        chunks.len(), total_tokens
+    tracing::info!(
+        chunks = chunks.len(),
+        tokens = total_tokens,
+        "[wiki/centroid] Selected new chunks by insertion order (no centroid)"
     );
 
     Ok(chunks)

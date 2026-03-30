@@ -388,6 +388,12 @@ export interface McpConfig {
   };
 }
 
+// Logs
+export async function exportLogs(): Promise<string> {
+  const result = await getTransport().invoke<{ logs: string }>('get_logs');
+  return result.logs;
+}
+
 export function getMcpConfig(serverBaseUrl: string): McpConfig {
   return {
     mcpServers: {

@@ -43,6 +43,8 @@ interface UIStore {
   loadingOperations: LoadingOperation[];
   // Left panel state
   leftPanelOpen: boolean;
+  // Server connection state
+  serverConnected: boolean;
   // Local graph state
   localGraph: LocalGraphState;
   highlightedAtomId: string | null;
@@ -52,6 +54,7 @@ interface UIStore {
   // Canvas navigation state
   canvasNav: CanvasNavState;
   // Actions
+  setServerConnected: (connected: boolean) => void;
   setLeftPanelOpen: (open: boolean) => void;
   toggleLeftPanel: () => void;
   setSelectedTag: (tagId: string | null) => void;
@@ -106,6 +109,7 @@ export const useUIStore = create<UIStore>()(
       },
       highlightedAtomId: null,
       leftPanelOpen: true,
+      serverConnected: false,
       commandPaletteOpen: false,
       commandPaletteInitialQuery: '',
       canvasNav: {
@@ -115,6 +119,7 @@ export const useUIStore = create<UIStore>()(
 
       setLeftPanelOpen: (open: boolean) => set({ leftPanelOpen: open }),
       toggleLeftPanel: () => set((state) => ({ leftPanelOpen: !state.leftPanelOpen })),
+      setServerConnected: (connected: boolean) => set({ serverConnected: connected }),
 
       setSelectedTag: (tagId: string | null) => set({ selectedTagId: tagId }),
 
