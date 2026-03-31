@@ -50,6 +50,7 @@ fn ensure_local_token(app_data_dir: &std::path::Path) -> String {
 
     let (_info, raw_token) = manager
         .registry()
+        .expect("Failed to access registry")
         .create_api_token("desktop")
         .expect("Failed to create API token");
 

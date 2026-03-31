@@ -76,7 +76,7 @@ fn create_manager(
     match storage {
         "postgres" => {
             if passphrase.is_some() {
-                eprintln!("Warning: --passphrase is ignored in Postgres mode (encryption is managed by Postgres)");
+                tracing::warn!("--passphrase is ignored in Postgres mode (encryption is managed by Postgres)");
             }
             let url = database_url.unwrap_or_else(|| {
                 tracing::error!("--database-url is required when --storage=postgres");
@@ -110,9 +110,17 @@ fn create_manager(
                 // serve an unlock endpoint for the UI to provide the passphrase.
                 match atomic_core::DatabaseManager::new_encrypted(data_dir, None) {
                     Ok(manager) => manager,
-                    Err(_) => {
-                        tracing::info!("database is encrypted — waiting for unlock via UI");
-                        atomic_core::DatabaseManager::new_deferred(data_dir)
+                    Err(e) => {
+                        // SQLCipher returns "file is not a database" when the key is wrong.
+                        // Distinguish this from genuine corruption or permission errors.
+                        let msg = e.to_string();
+                        if msg.contains("not a database") || msg.contains("file is encrypted") {
+                            tracing::info!("database is encrypted — waiting for unlock via UI");
+                            atomic_core::DatabaseManager::new_deferred(data_dir)
+                        } else {
+                            tracing::error!(error = %e, "failed to open database — this may indicate file corruption or a permissions issue");
+                            std::process::exit(1);
+                        }
                     }
                 }
             }

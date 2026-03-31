@@ -81,8 +81,14 @@ impl DatabaseManager {
 
     /// Initialize the manager, creating the registry and databases with an optional passphrase.
     /// Called during the setup/claim flow when databases were deferred.
+    ///
+    /// Uses the registry write lock to prevent two concurrent requests from both
+    /// initializing with potentially mismatched passphrases (TOCTOU guard).
     pub fn initialize(&self, passphrase: Option<String>) -> Result<(), AtomicCoreError> {
-        if self.is_initialized() {
+        // Acquire the registry write lock FIRST, then check under the lock to
+        // prevent a race where two concurrent requests both see is_initialized() == false.
+        let mut reg = self.registry.write().map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
+        if reg.is_some() {
             return Err(AtomicCoreError::Configuration(
                 "Manager already initialized".to_string(),
             ));
@@ -100,11 +106,8 @@ impl DatabaseManager {
             *pp = passphrase;
         }
 
-        // Store registry
-        {
-            let mut reg = self.registry.write().map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
-            *reg = Some(registry);
-        }
+        // Store registry (already holding the write lock)
+        *reg = Some(registry);
 
         // Update active ID
         {
@@ -279,7 +282,9 @@ impl DatabaseManager {
                     }
                     let mut cores = self.cores.write().map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
                     cores.insert(id.to_string(), core.clone());
-                    self.require_registry().ok().map(|r| r.touch_database(id).ok());
+                    if let Err(e) = self.require_registry().and_then(|r| r.touch_database(id)) {
+                        tracing::warn!(db_id = %id, error = %e, "failed to touch database timestamp");
+                    }
                     return Ok(core);
                 }
             }
@@ -347,11 +352,9 @@ impl DatabaseManager {
     }
 
     /// Get the registry for settings/token/database CRUD.
-    /// Panics if the manager is not initialized — callers should check `is_initialized()` first
-    /// or use routes that require initialization.
-    pub fn registry(&self) -> Arc<Registry> {
+    /// Returns an error if the manager is not yet initialized (deferred mode).
+    pub fn registry(&self) -> Result<Arc<Registry>, AtomicCoreError> {
         self.require_registry()
-            .expect("DatabaseManager not initialized — complete setup first")
     }
 
     /// Create a new database and register it.
