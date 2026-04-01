@@ -40,12 +40,12 @@ https://github.com/user-attachments/assets/e466c26a-48f6-4eb5-b276-4145b052b390
 - **Wiki Synthesis** — LLM-generated articles with inline citations, built from your notes
 - **Chat** — Agentic RAG interface that searches your knowledge base during conversation
 - **Auto-Tagging** — LLM-powered tag extraction organized into hierarchical categories
-- **Multiple AI Providers** — OpenRouter (cloud) or Ollama (local) for embeddings and LLMs
+- **Multiple AI Providers** — OpenRouter, Ollama, or any OpenAI-compatible provider for embeddings and LLMs
 - **RSS Feeds** — Subscribe to feeds and automatically sync new articles as atoms
-- **Browser Extension** — Capture web content directly into Atomic
+- **Browser Extension** — Capture web content directly into Atomic ([Chrome Web Store](https://chromewebstore.google.com/detail/bknijbafnefbaklndpglcmlhaglikccf))
 - **MCP Server** — Expose your knowledge base to Claude and other AI tools
 - **Multi-Database** — Multiple knowledge bases with a shared registry
-- **iOS App** — Native SwiftUI client for reading and writing atoms on mobile
+- **iOS App** — Native SwiftUI client for reading and writing atoms on mobile ([App Store](https://apps.apple.com/us/app/atomic-kb/id6759266634))
 
 ## Getting Started
 
@@ -96,19 +96,15 @@ cargo run -p atomic-server -- --data-dir ./data token create --name default
 
 Atomic needs an AI provider for embeddings, tagging, wiki generation, and chat.
 
-- **OpenRouter** (cloud) — Get an API key from [openrouter.ai](https://openrouter.ai). Supports separate model selection for embedding, tagging, wiki, and chat.
-- **Ollama** (local) — Install [Ollama](https://ollama.com) and pull models (e.g., `ollama pull nomic-embed-text`). Atomic auto-discovers available models.
+- **OpenRouter** — Get an API key from [openrouter.ai](https://openrouter.ai). Supports separate model selection for embedding, tagging, wiki, and chat.
+- **Ollama** — Install [Ollama](https://ollama.com) and pull models (e.g., `ollama pull nomic-embed-text`). Atomic auto-discovers available models.
+- **OpenAI-compatible** — Any provider with an OpenAI-compatible API (e.g., OpenAI, Azure OpenAI, Together, Groq). Configure the base URL and API key.
 
 Configure via the setup wizard on first launch, or later in Settings.
 
 ## Browser Extension
 
-The Atomic Web Clipper captures web content as atoms:
-
-1. Open Chrome/Edge/Brave and navigate to `chrome://extensions`
-2. Enable "Developer mode"
-3. Click "Load unpacked" and select the `extension/` directory
-4. Configure your server URL and API token in the extension options
+The Atomic Web Clipper captures web content as atoms. Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/bknijbafnefbaklndpglcmlhaglikccf), then configure your server URL and API token in the extension options.
 
 Captures are queued offline and synced when the server is available.
 
@@ -211,9 +207,9 @@ npx tsc --noEmit                  # Frontend type check
 | Server | actix-web |
 | Frontend | React 18, TypeScript, Vite 6, Tailwind CSS v4, Zustand 5 |
 | Editor | CodeMirror 6 |
-| Canvas | d3-force, react-zoom-pan-pinch |
+| Canvas | Sigma.js, Graphology |
 | iOS | SwiftUI, XcodeGen |
-| AI | OpenRouter or Ollama (pluggable) |
+| AI | OpenRouter, Ollama, or OpenAI-compatible (pluggable) |
 
 ## License
 
