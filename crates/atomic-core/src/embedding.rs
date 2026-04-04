@@ -1138,20 +1138,25 @@ where
     let count = pending_atoms.len() as i32;
 
     if count > 0 {
-        // Process batch asynchronously on the shared background runtime
+        // Process batch asynchronously on the shared background runtime.
+        // skip_tagging=true: this entry point is for embedding recovery only.
+        // Tagging has its own separate recovery path (process_pending_tagging)
+        // which respects per-atom tagging_status. Running tagging here would
+        // re-tag atoms that were intentionally marked 'skipped' (e.g. by a
+        // dimension-change reset, where existing tags should be preserved).
         crate::executor::spawn(async move {
             match external_settings {
                 Some(s) => process_embedding_batch_with_settings(
                     storage,
                     pending_atoms,
-                    false,
+                    true,
                     on_event,
                     s,
                 ).await,
                 None => process_embedding_batch(
                     storage,
                     pending_atoms,
-                    false,
+                    true,
                     on_event,
                 ).await,
             };
