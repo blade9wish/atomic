@@ -1353,17 +1353,19 @@ impl AtomicCore {
     where
         F: Fn(EmbeddingEvent) + Send + Sync + Clone + 'static,
     {
+        let current_settings = self.get_settings()?;
+        let value_changed = current_settings.get(key).map(|s| s.as_str()) != Some(value);
+
         let dimension_affecting_keys = ["provider", "embedding_model", "ollama_embedding_model", "openai_compat_embedding_model", "openai_compat_embedding_dimension"];
         let mut dimension_changed = false;
         let mut old_dim = 0usize;
         let mut new_dim = 0usize;
 
-        if dimension_affecting_keys.contains(&key) {
-            let current_settings = self.get_settings()?;
+        if dimension_affecting_keys.contains(&key) && value_changed {
             let current_config = ProviderConfig::from_settings(&current_settings);
             old_dim = current_config.embedding_dimension();
 
-            let mut new_settings = current_settings;
+            let mut new_settings = current_settings.clone();
             new_settings.insert(key.to_string(), value.to_string());
             let new_config = ProviderConfig::from_settings(&new_settings);
             new_dim = new_config.embedding_dimension();
@@ -1373,11 +1375,9 @@ impl AtomicCore {
                     old_dim,
                     new_dim,
                     key,
-                    "Embedding dimension change detected — awaiting user confirmation before re-embedding"
+                    "Embedding dimension change detected — recreating vector index and re-embedding all atoms"
                 );
                 dimension_changed = true;
-                // Do NOT recreate vec_chunks or re-embed here.
-                // The frontend must call reembed_all_atoms after user types "RE-EMBED".
             }
         }
 
@@ -1388,9 +1388,15 @@ impl AtomicCore {
             self.storage.set_setting_sync(key, value)?;
         }
 
-        let mut pending_count = 0i32;
         if dimension_changed {
-            pending_count = self.spawn_reembed_pending(on_event.clone())?;
+            // Recreate the active database's vector index at the new dimension.
+            // This drops vec_chunks, recreates it, clears atom_chunks/semantic_edges,
+            // and resets every atom's embedding_status to 'pending'.
+            self.storage.recreate_vector_index_sync(new_dim)?;
+            tracing::info!(new_dim, "Recreated active database vector index for dimension change");
+            // Now spawn re-embedding — atoms are in 'pending' status after the recreate.
+            let queued = self.spawn_reembed_pending(on_event.clone())?;
+            tracing::info!(queued, "Queued atoms for re-embedding after dimension change");
         }
 
         // Auto-retry failed atoms when provider config changes
@@ -1401,7 +1407,7 @@ impl AtomicCore {
             "openrouter_api_key",
         ];
         let mut retried_failed = 0i32;
-        if retry_keys.contains(&key) && !dimension_changed {
+        if retry_keys.contains(&key) && !dimension_changed && value_changed {
             retried_failed = self.storage.reset_failed_embeddings_sync()?;
             if retried_failed > 0 {
                 tracing::info!(
