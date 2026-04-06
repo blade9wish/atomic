@@ -1280,6 +1280,9 @@ where
     process_pending_embeddings_inner(storage, on_event, Some(settings_map))
 }
 
+/// Max atoms to process per background embedding batch (limits memory usage).
+const PENDING_BATCH_SIZE: i32 = 100;
+
 fn process_pending_embeddings_inner<F>(
     storage: StorageBackend,
     on_event: F,
@@ -1288,17 +1291,32 @@ fn process_pending_embeddings_inner<F>(
 where
     F: Fn(EmbeddingEvent) + Send + Sync + Clone + 'static,
 {
-    // Atomically fetch and mark pending atoms as 'processing' in a single statement
-    // This prevents race conditions from duplicate calls
-    let pending_atoms = storage.claim_pending_embeddings_sync(i32::MAX)
-        .map_err(|e| e.to_string())?;
+    // Claim atoms in capped batches to avoid loading thousands into memory at once.
+    // Each batch is processed sequentially (gated by EMBEDDING_BATCH_SEMAPHORE).
+    let mut total_count = 0i32;
 
-    let count = pending_atoms.len() as i32;
+    loop {
+        let pending_atoms = storage.claim_pending_embeddings_sync(PENDING_BATCH_SIZE)
+            .map_err(|e| e.to_string())?;
 
-    if count > 0 {
-        // Process batch asynchronously on the shared background runtime
+        if pending_atoms.is_empty() {
+            break;
+        }
+
+        total_count += pending_atoms.len() as i32;
+
+        let storage = storage.clone();
+        let on_event = on_event.clone();
+        let settings = external_settings.clone();
+
         crate::executor::spawn(async move {
-            match external_settings {
+            // Limit concurrent batch tasks to bound memory
+            let _permit = crate::executor::EMBEDDING_BATCH_SEMAPHORE
+                .acquire()
+                .await
+                .expect("Embedding batch semaphore closed unexpectedly");
+
+            match settings {
                 Some(s) => process_embedding_batch_with_settings(
                     storage,
                     pending_atoms,
@@ -1316,7 +1334,7 @@ where
         });
     }
 
-    Ok(count)
+    Ok(total_count)
 }
 
 /// Running accumulator for computing a centroid without holding all blobs in memory.
