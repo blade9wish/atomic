@@ -1134,7 +1134,7 @@ async fn process_embedding_batch_inner<F>(
     }
 
     // === Wait for tagging to complete ===
-    if !skip_tagging && tagging_remaining.load(Ordering::Acquire) > 0 {
+    while !skip_tagging && tagging_remaining.load(Ordering::Acquire) > 0 {
         tagging_done_notify.notified().await;
     }
 
