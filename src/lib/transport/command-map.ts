@@ -317,7 +317,12 @@ export const COMMAND_MAP: Record<string, CommandSpec> = {
 
   get_global_canvas: {
     method: 'GET',
-    path: '/api/canvas/global',
+    path: (a) => {
+      const params = new URLSearchParams();
+      if (a.algorithm) params.set('algorithm', a.algorithm as string);
+      const qs = params.toString();
+      return `/api/canvas/global${qs ? `?${qs}` : ''}`;
+    },
   },
 
   // ==================== Graph ====================
@@ -343,6 +348,7 @@ export const COMMAND_MAP: Record<string, CommandSpec> = {
     transformArgs: (a) => ({
       min_similarity: a.minSimilarity,
       min_cluster_size: a.minClusterSize,
+      algorithm: a.algorithm ?? undefined,
     }),
   },
   get_clusters: {

@@ -420,6 +420,17 @@ pub struct NeighborhoodEdge {
     pub similarity_score: Option<f32>,
 }
 
+/// Algorithm used to compute clusters
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ClusterAlgorithm {
+    #[default]
+    LabelPropagation,
+    Louvain,
+    Leiden,
+}
+
 /// Atom cluster assignment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

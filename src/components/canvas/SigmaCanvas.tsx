@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useUIStore } from '../../stores/ui';
 import { useDatabasesStore } from '../../stores/databases';
-import { getGlobalCanvas, type GlobalCanvasData } from '../../lib/api';
+import { getGlobalCanvas, type GlobalCanvasData, type ClusterAlgorithm } from '../../lib/api';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import EdgeCurveProgram from '@sigma/edge-curve';
@@ -12,6 +12,20 @@ import {
   edgeColor,
   type CanvasTheme,
 } from './sigma/themes';
+
+const ALGORITHM_OPTIONS: { value: ClusterAlgorithm; label: string }[] = [
+  { value: 'label_propagation', label: 'Label Propagation' },
+  { value: 'louvain', label: 'Louvain' },
+  { value: 'leiden', label: 'Leiden' },
+];
+
+function getStoredAlgorithm(): ClusterAlgorithm {
+  const stored = localStorage.getItem('canvas-cluster-algorithm');
+  if (stored === 'label_propagation' || stored === 'louvain' || stored === 'leiden') {
+    return stored;
+  }
+  return 'label_propagation';
+}
 
 function truncLabel(str: string, max: number): string {
   return str.length > max ? str.substring(0, max - 1) + '\u2026' : str;
@@ -29,6 +43,8 @@ export function SigmaCanvas() {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<CanvasTheme>(DEFAULT_THEME);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const [algorithm, setAlgorithm] = useState<ClusterAlgorithm>(getStoredAlgorithm);
+  const [algPickerOpen, setAlgPickerOpen] = useState(false);
   const [edgeThreshold, setEdgeThreshold] = useState(0);
   const edgeThresholdRef = useRef(0);
   const edgeAnimProgress = useRef(1); // 0 = invisible, 1 = fully visible
@@ -45,7 +61,7 @@ export function SigmaCanvas() {
     setIsLoading(true);
     setError(null);
 
-    getGlobalCanvas()
+    getGlobalCanvas(algorithm)
       .then((result) => {
         if (!cancelled) {
           setData(result);
@@ -60,7 +76,7 @@ export function SigmaCanvas() {
       });
 
     return () => { cancelled = true; };
-  }, [activeDbId]);
+  }, [activeDbId, algorithm]);
 
   // Precomputed data for the graph
   const graphDataRef = useRef<{
@@ -491,6 +507,34 @@ export function SigmaCanvas() {
               <span className="text-[9px] text-white/30">
                 {Math.round((1 - edgeThreshold) * 100)}%
               </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setAlgPickerOpen(!algPickerOpen)}
+                title="Clustering algorithm"
+                className="px-2 py-0.5 rounded-full text-[9px] font-medium border border-white/20 hover:border-white/40 transition-all text-white/50 hover:text-white/70"
+              >
+                {ALGORITHM_OPTIONS.find(a => a.value === algorithm)?.label}
+              </button>
+              <div
+                className={`flex gap-1 overflow-hidden transition-all duration-200 ${
+                  algPickerOpen ? 'max-w-[300px] opacity-100' : 'max-w-0 opacity-0'
+                }`}
+              >
+                {ALGORITHM_OPTIONS.filter(a => a.value !== algorithm).map((alg) => (
+                  <button
+                    key={alg.value}
+                    onClick={() => {
+                      localStorage.setItem('canvas-cluster-algorithm', alg.value);
+                      setAlgorithm(alg.value);
+                      setAlgPickerOpen(false);
+                    }}
+                    className="px-2 py-0.5 rounded-full text-[9px] border border-white/15 hover:border-white/40 transition-all text-white/40 hover:text-white/60 whitespace-nowrap"
+                  >
+                    {alg.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}

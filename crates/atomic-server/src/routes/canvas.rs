@@ -58,9 +58,21 @@ pub async fn get_canvas_level(
     blocking_ok(move || core.get_canvas_level(parent_id.as_deref(), children_hint)).await
 }
 
+/// Query parameters for the global canvas endpoint
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct GlobalCanvasQuery {
+    /// Clustering algorithm (default: label_propagation)
+    pub algorithm: Option<atomic_core::ClusterAlgorithm>,
+}
+
 /// Compute PCA 2D projection and return all atoms with positions, edges, and cluster labels
-#[utoipa::path(get, path = "/api/canvas/global", responses((status = 200, description = "Global canvas data", body = atomic_core::GlobalCanvasData)), tag = "canvas")]
-pub async fn get_global_canvas(db: Db) -> HttpResponse {
+#[utoipa::path(get, path = "/api/canvas/global", params(GlobalCanvasQuery), responses((status = 200, description = "Global canvas data", body = atomic_core::GlobalCanvasData)), tag = "canvas")]
+pub async fn get_global_canvas(
+    db: Db,
+    query: web::Query<GlobalCanvasQuery>,
+) -> HttpResponse {
+    let algorithm = query.algorithm.unwrap_or_default();
     let core = db.0;
-    blocking_ok(move || core.compute_and_get_canvas_data()).await
+    blocking_ok(move || core.compute_and_get_canvas_data(algorithm)).await
 }

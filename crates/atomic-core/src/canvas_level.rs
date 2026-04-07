@@ -173,7 +173,7 @@ pub fn get_canvas_level(
 /// Root level: show semantic clusters of all atoms
 fn build_root_level(conn: &Connection) -> Result<CanvasLevel, AtomicCoreError> {
     // Compute semantic clusters on-demand from all semantic edges
-    let clusters = clustering::compute_atom_clusters(conn, CLUSTER_MIN_SIMILARITY, 3)
+    let clusters = clustering::compute_atom_clusters(conn, CLUSTER_MIN_SIMILARITY, 3, crate::models::ClusterAlgorithm::default())
         .map_err(|e| AtomicCoreError::Configuration(e))?;
 
     let mut nodes: Vec<CanvasNode> = Vec::new();

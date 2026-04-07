@@ -188,8 +188,10 @@ export interface GlobalCanvasData {
   clusters: CanvasClusterLabel[];
 }
 
-export async function getGlobalCanvas(): Promise<GlobalCanvasData> {
-  return getTransport().invoke('get_global_canvas', {});
+export type ClusterAlgorithm = 'label_propagation' | 'louvain' | 'leiden';
+
+export async function getGlobalCanvas(algorithm?: ClusterAlgorithm): Promise<GlobalCanvasData> {
+  return getTransport().invoke('get_global_canvas', { algorithm });
 }
 
 // Semantic graph types and commands
@@ -259,9 +261,10 @@ export interface AtomCluster {
 
 export async function computeClusters(
   minSimilarity: number = 0.5,
-  minClusterSize: number = 2
+  minClusterSize: number = 2,
+  algorithm?: ClusterAlgorithm
 ): Promise<AtomCluster[]> {
-  return getTransport().invoke('compute_clusters', { minSimilarity, minClusterSize });
+  return getTransport().invoke('compute_clusters', { minSimilarity, minClusterSize, algorithm });
 }
 
 export async function getClusters(): Promise<AtomCluster[]> {

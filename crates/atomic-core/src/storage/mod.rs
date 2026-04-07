@@ -406,7 +406,7 @@ dispatch! {
         => sqlite: backfill_feed_metadata_sync, pg_trait: FeedStore, pg_method: backfill_feed_metadata;
 
     // ---- ClusterStore ----
-    fn compute_clusters_sync(&self, min_similarity: f32, min_cluster_size: i32) -> Result<Vec<AtomCluster>, AtomicCoreError>
+    fn compute_clusters_sync(&self, min_similarity: f32, min_cluster_size: i32, algorithm: ClusterAlgorithm) -> Result<Vec<AtomCluster>, AtomicCoreError>
         => sqlite: compute_clusters_sync, pg_trait: ClusterStore, pg_method: compute_clusters;
     fn save_clusters_sync(&self, clusters: &[AtomCluster]) -> Result<(), AtomicCoreError>
         => sqlite: save_clusters_sync, pg_trait: ClusterStore, pg_method: save_clusters;

@@ -5,7 +5,20 @@
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 
-use crate::models::AtomCluster;
+use crate::models::{AtomCluster, ClusterAlgorithm};
+
+/// Dispatch to the selected clustering algorithm.
+/// All algorithms take the same weighted edge list and return node → cluster label.
+pub fn run_algorithm(
+    algorithm: ClusterAlgorithm,
+    edges: &[(String, String, f32)],
+) -> HashMap<String, u32> {
+    match algorithm {
+        ClusterAlgorithm::LabelPropagation => label_propagation(edges),
+        ClusterAlgorithm::Louvain => louvain(edges),
+        ClusterAlgorithm::Leiden => leiden(edges),
+    }
+}
 
 /// Run label propagation on an arbitrary weighted adjacency list.
 /// Returns a map from node ID to cluster label (u32).
@@ -80,6 +93,392 @@ pub fn label_propagation(
     labels
 }
 
+/// Run Louvain modularity optimization on a weighted adjacency list.
+/// Phase 1: Greedily move nodes to neighbor communities to maximize modularity.
+/// Phase 2: Collapse communities into super-nodes; repeat until no improvement.
+pub fn louvain(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
+    if edges.is_empty() {
+        return HashMap::new();
+    }
+
+    // Build adjacency and compute total weight
+    let mut adjacency: HashMap<String, Vec<(String, f32)>> = HashMap::new();
+    let mut all_nodes: HashSet<String> = HashSet::new();
+    let mut total_weight: f64 = 0.0;
+
+    for (source, target, weight) in edges {
+        let w = *weight;
+        adjacency
+            .entry(source.clone())
+            .or_default()
+            .push((target.clone(), w));
+        adjacency
+            .entry(target.clone())
+            .or_default()
+            .push((source.clone(), w));
+        all_nodes.insert(source.clone());
+        all_nodes.insert(target.clone());
+        total_weight += w as f64;
+    }
+
+    // total_weight = sum of all edge weights (each edge counted once above)
+    // In modularity formula, m = total_weight, and we use 2m for normalization
+    let two_m = 2.0 * total_weight;
+    if two_m == 0.0 {
+        return HashMap::new();
+    }
+
+    let mut sorted_nodes: Vec<String> = all_nodes.into_iter().collect();
+    sorted_nodes.sort();
+
+    // Initialize: each node in its own community
+    let mut community: HashMap<String, u32> = HashMap::new();
+    for (i, node) in sorted_nodes.iter().enumerate() {
+        community.insert(node.clone(), i as u32);
+    }
+
+    // k_i = sum of weights of all edges incident to node i
+    let mut k: HashMap<String, f64> = HashMap::new();
+    for node in &sorted_nodes {
+        let ki: f64 = adjacency
+            .get(node)
+            .map(|neighbors| neighbors.iter().map(|(_, w)| *w as f64).sum())
+            .unwrap_or(0.0);
+        k.insert(node.clone(), ki);
+    }
+
+    // Phase 1: Local moves
+    let max_passes = 20;
+    for _ in 0..max_passes {
+        let mut improved = false;
+
+        // Compute community aggregates: sum_tot (total incident weight) and sum_in (internal weight)
+        let mut sum_tot: HashMap<u32, f64> = HashMap::new();
+        let mut sum_in: HashMap<u32, f64> = HashMap::new();
+        for node in &sorted_nodes {
+            let c = community[node];
+            *sum_tot.entry(c).or_default() += k[node];
+        }
+        for (source, target, weight) in edges {
+            let cs = community[source];
+            let ct = community[target];
+            if cs == ct {
+                *sum_in.entry(cs).or_default() += 2.0 * (*weight as f64);
+            }
+        }
+
+        for node in &sorted_nodes {
+            let ki = k[node];
+            let current_comm = community[node];
+
+            // Compute k_i_in for each neighboring community
+            let mut neighbor_comm_weights: HashMap<u32, f64> = HashMap::new();
+            if let Some(neighbors) = adjacency.get(node) {
+                for (neighbor, w) in neighbors {
+                    let nc = community[neighbor];
+                    *neighbor_comm_weights.entry(nc).or_default() += *w as f64;
+                }
+            }
+
+            // Delta Q for removing node from its current community
+            let ki_in_current = neighbor_comm_weights.get(&current_comm).copied().unwrap_or(0.0);
+            let st_current = sum_tot.get(&current_comm).copied().unwrap_or(0.0);
+            let remove_cost = ki_in_current / two_m - (st_current * ki) / (two_m * two_m);
+
+            // Find best community to move to
+            let mut best_comm = current_comm;
+            let mut best_gain = 0.0;
+
+            for (&target_comm, &ki_in_target) in &neighbor_comm_weights {
+                if target_comm == current_comm {
+                    continue;
+                }
+                let st_target = sum_tot.get(&target_comm).copied().unwrap_or(0.0);
+                let gain = ki_in_target / two_m - (st_target * ki) / (two_m * two_m) - remove_cost;
+                if gain > best_gain {
+                    best_gain = gain;
+                    best_comm = target_comm;
+                }
+            }
+
+            if best_comm != current_comm {
+                // Update aggregates
+                let ki = k[node];
+                *sum_tot.entry(current_comm).or_default() -= ki;
+                *sum_tot.entry(best_comm).or_default() += ki;
+                *sum_in.entry(current_comm).or_default() -= 2.0 * ki_in_current;
+                let ki_in_best = neighbor_comm_weights.get(&best_comm).copied().unwrap_or(0.0);
+                *sum_in.entry(best_comm).or_default() += 2.0 * ki_in_best;
+
+                community.insert(node.clone(), best_comm);
+                improved = true;
+            }
+        }
+
+        if !improved {
+            break;
+        }
+    }
+
+    // Normalize labels to 0..N
+    let mut label_map: HashMap<u32, u32> = HashMap::new();
+    let mut next_label = 0u32;
+    let mut result: HashMap<String, u32> = HashMap::new();
+    for node in &sorted_nodes {
+        let c = community[node];
+        let label = *label_map.entry(c).or_insert_with(|| {
+            let l = next_label;
+            next_label += 1;
+            l
+        });
+        result.insert(node.clone(), label);
+    }
+
+    result
+}
+
+/// Run Leiden community detection on a weighted adjacency list.
+/// Improves on Louvain by adding a refinement phase that ensures
+/// communities are well-connected internally.
+pub fn leiden(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
+    if edges.is_empty() {
+        return HashMap::new();
+    }
+
+    // Build adjacency
+    let mut adjacency: HashMap<String, Vec<(String, f32)>> = HashMap::new();
+    let mut all_nodes: HashSet<String> = HashSet::new();
+    let mut total_weight: f64 = 0.0;
+
+    for (source, target, weight) in edges {
+        let w = *weight;
+        adjacency
+            .entry(source.clone())
+            .or_default()
+            .push((target.clone(), w));
+        adjacency
+            .entry(target.clone())
+            .or_default()
+            .push((source.clone(), w));
+        all_nodes.insert(source.clone());
+        all_nodes.insert(target.clone());
+        total_weight += w as f64;
+    }
+
+    let two_m = 2.0 * total_weight;
+    if two_m == 0.0 {
+        return HashMap::new();
+    }
+
+    let mut sorted_nodes: Vec<String> = all_nodes.into_iter().collect();
+    sorted_nodes.sort();
+
+    // k_i = sum of weights of all edges incident to node i
+    let mut k: HashMap<String, f64> = HashMap::new();
+    for node in &sorted_nodes {
+        let ki: f64 = adjacency
+            .get(node)
+            .map(|neighbors| neighbors.iter().map(|(_, w)| *w as f64).sum())
+            .unwrap_or(0.0);
+        k.insert(node.clone(), ki);
+    }
+
+    // Initialize: each node in its own community
+    let mut community: HashMap<String, u32> = HashMap::new();
+    for (i, node) in sorted_nodes.iter().enumerate() {
+        community.insert(node.clone(), i as u32);
+    }
+
+    let max_iterations = 10;
+    for _ in 0..max_iterations {
+        // --- Phase 1: Local moving (same as Louvain) ---
+        let mut phase1_community = community.clone();
+        let mut moved = false;
+
+        for _ in 0..20 {
+            let mut pass_moved = false;
+
+            let mut sum_tot: HashMap<u32, f64> = HashMap::new();
+            for node in &sorted_nodes {
+                let c = phase1_community[node];
+                *sum_tot.entry(c).or_default() += k[node];
+            }
+
+            for node in &sorted_nodes {
+                let ki = k[node];
+                let current_comm = phase1_community[node];
+
+                let mut neighbor_comm_weights: HashMap<u32, f64> = HashMap::new();
+                if let Some(neighbors) = adjacency.get(node) {
+                    for (neighbor, w) in neighbors {
+                        let nc = phase1_community[neighbor];
+                        *neighbor_comm_weights.entry(nc).or_default() += *w as f64;
+                    }
+                }
+
+                let ki_in_current =
+                    neighbor_comm_weights.get(&current_comm).copied().unwrap_or(0.0);
+                let st_current = sum_tot.get(&current_comm).copied().unwrap_or(0.0);
+                let remove_cost =
+                    ki_in_current / two_m - (st_current * ki) / (two_m * two_m);
+
+                let mut best_comm = current_comm;
+                let mut best_gain = 0.0;
+
+                for (&target_comm, &ki_in_target) in &neighbor_comm_weights {
+                    if target_comm == current_comm {
+                        continue;
+                    }
+                    let st_target = sum_tot.get(&target_comm).copied().unwrap_or(0.0);
+                    let gain =
+                        ki_in_target / two_m - (st_target * ki) / (two_m * two_m) - remove_cost;
+                    if gain > best_gain {
+                        best_gain = gain;
+                        best_comm = target_comm;
+                    }
+                }
+
+                if best_comm != current_comm {
+                    *sum_tot.entry(current_comm).or_default() -= ki;
+                    *sum_tot.entry(best_comm).or_default() += ki;
+                    phase1_community.insert(node.clone(), best_comm);
+                    pass_moved = true;
+                    moved = true;
+                }
+            }
+
+            if !pass_moved {
+                break;
+            }
+        }
+
+        if !moved {
+            break;
+        }
+
+        // --- Phase 2: Refinement ---
+        // Within each phase-1 community, re-partition nodes using local moves
+        // restricted to subcommunities of that community. This ensures communities
+        // are internally well-connected.
+        let mut refined_community: HashMap<String, u32> = HashMap::new();
+        let mut next_refined_label = 0u32;
+
+        // Group nodes by phase-1 community
+        let mut comm_members: HashMap<u32, Vec<String>> = HashMap::new();
+        for node in &sorted_nodes {
+            comm_members
+                .entry(phase1_community[node])
+                .or_default()
+                .push(node.clone());
+        }
+
+        for (_comm_id, members) in &comm_members {
+            if members.len() <= 1 {
+                // Singleton — keep as-is
+                for node in members {
+                    refined_community.insert(node.clone(), next_refined_label);
+                }
+                next_refined_label += 1;
+                continue;
+            }
+
+            // Start each node in its own sub-community within this phase-1 community
+            let member_set: HashSet<&String> = members.iter().collect();
+            let mut sub_comm: HashMap<String, u32> = HashMap::new();
+            let mut sub_label = next_refined_label;
+            for node in members {
+                sub_comm.insert(node.clone(), sub_label);
+                sub_label += 1;
+            }
+
+            // Local moves within this community only
+            for _ in 0..10 {
+                let mut sub_moved = false;
+
+                let mut sub_sum_tot: HashMap<u32, f64> = HashMap::new();
+                for node in members {
+                    let c = sub_comm[node];
+                    *sub_sum_tot.entry(c).or_default() += k[node];
+                }
+
+                for node in members {
+                    let ki = k[node];
+                    let current_sub = sub_comm[node];
+
+                    // Only consider neighbors within this community
+                    let mut neighbor_sub_weights: HashMap<u32, f64> = HashMap::new();
+                    if let Some(neighbors) = adjacency.get(node) {
+                        for (neighbor, w) in neighbors {
+                            if !member_set.contains(neighbor) {
+                                continue;
+                            }
+                            let nc = sub_comm[neighbor];
+                            *neighbor_sub_weights.entry(nc).or_default() += *w as f64;
+                        }
+                    }
+
+                    let ki_in_current =
+                        neighbor_sub_weights.get(&current_sub).copied().unwrap_or(0.0);
+                    let st_current = sub_sum_tot.get(&current_sub).copied().unwrap_or(0.0);
+                    let remove_cost =
+                        ki_in_current / two_m - (st_current * ki) / (two_m * two_m);
+
+                    let mut best_sub = current_sub;
+                    let mut best_gain = 0.0;
+
+                    for (&target_sub, &ki_in_target) in &neighbor_sub_weights {
+                        if target_sub == current_sub {
+                            continue;
+                        }
+                        let st_target = sub_sum_tot.get(&target_sub).copied().unwrap_or(0.0);
+                        let gain = ki_in_target / two_m
+                            - (st_target * ki) / (two_m * two_m)
+                            - remove_cost;
+                        if gain > best_gain {
+                            best_gain = gain;
+                            best_sub = target_sub;
+                        }
+                    }
+
+                    if best_sub != current_sub {
+                        *sub_sum_tot.entry(current_sub).or_default() -= ki;
+                        *sub_sum_tot.entry(best_sub).or_default() += ki;
+                        sub_comm.insert(node.clone(), best_sub);
+                        sub_moved = true;
+                    }
+                }
+
+                if !sub_moved {
+                    break;
+                }
+            }
+
+            for node in members {
+                refined_community.insert(node.clone(), sub_comm[node]);
+            }
+            next_refined_label = sub_label;
+        }
+
+        community = refined_community;
+    }
+
+    // Normalize labels to 0..N
+    let mut label_map: HashMap<u32, u32> = HashMap::new();
+    let mut next_label = 0u32;
+    let mut result: HashMap<String, u32> = HashMap::new();
+    for node in &sorted_nodes {
+        let c = community[node];
+        let label = *label_map.entry(c).or_insert_with(|| {
+            let l = next_label;
+            next_label += 1;
+            l
+        });
+        result.insert(node.clone(), label);
+    }
+
+    result
+}
+
 /// Group label propagation results into clusters, filtering by minimum size.
 /// Returns Vec of (cluster members, dominant tags).
 pub fn group_labels_into_clusters(
@@ -107,6 +506,7 @@ pub fn compute_atom_clusters(
     conn: &Connection,
     min_similarity: f32,
     min_cluster_size: i32,
+    algorithm: ClusterAlgorithm,
 ) -> Result<Vec<AtomCluster>, String> {
     // Load all semantic edges above threshold
     let mut stmt = conn
@@ -129,7 +529,7 @@ pub fn compute_atom_clusters(
         return Ok(vec![]);
     }
 
-    let labels = label_propagation(&edges);
+    let labels = run_algorithm(algorithm, &edges);
     let groups = group_labels_into_clusters(&labels, min_cluster_size as usize);
 
     let mut clusters: Vec<AtomCluster> = Vec::new();
@@ -311,7 +711,7 @@ mod tests {
         let conn = db.conn.lock().unwrap();
 
         // No edges = no clusters
-        let clusters = compute_atom_clusters(&conn, 0.5, 2).unwrap();
+        let clusters = compute_atom_clusters(&conn, 0.5, 2, ClusterAlgorithm::LabelPropagation).unwrap();
         assert!(clusters.is_empty(), "No edges should result in empty clusters");
     }
 
@@ -331,7 +731,7 @@ mod tests {
         insert_semantic_edge(&conn, "atom1", "atom3", 0.8);
 
         // All 3 should end up in one cluster (min_cluster_size = 2)
-        let clusters = compute_atom_clusters(&conn, 0.5, 2).unwrap();
+        let clusters = compute_atom_clusters(&conn, 0.5, 2, ClusterAlgorithm::LabelPropagation).unwrap();
         assert_eq!(clusters.len(), 1, "All connected atoms should form one cluster");
         assert_eq!(
             clusters[0].atom_ids.len(),

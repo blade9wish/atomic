@@ -1149,6 +1149,7 @@ impl ClusterStore for PostgresStorage {
         &self,
         min_similarity: f32,
         min_cluster_size: i32,
+        algorithm: ClusterAlgorithm,
     ) -> StorageResult<Vec<AtomCluster>> {
         // Load semantic edges above threshold
         let edges: Vec<(String, String, f32)> = sqlx::query_as(
@@ -1166,7 +1167,7 @@ impl ClusterStore for PostgresStorage {
             return Ok(vec![]);
         }
 
-        let labels = clustering::label_propagation(&edges);
+        let labels = clustering::run_algorithm(algorithm, &edges);
         let groups = clustering::group_labels_into_clusters(&labels, min_cluster_size as usize);
 
         let mut clusters: Vec<AtomCluster> = Vec::new();
@@ -1220,7 +1221,7 @@ impl ClusterStore for PostgresStorage {
         let count = count.unwrap_or(0);
 
         if count == 0 {
-            let clusters = self.compute_clusters(0.5, 2).await?;
+            let clusters = self.compute_clusters(0.5, 2, ClusterAlgorithm::default()).await?;
             self.save_clusters(&clusters).await?;
             return Ok(clusters);
         }

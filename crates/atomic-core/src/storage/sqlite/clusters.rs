@@ -11,13 +11,14 @@ impl SqliteStorage {
         &self,
         min_similarity: f32,
         min_cluster_size: i32,
+        algorithm: ClusterAlgorithm,
     ) -> StorageResult<Vec<AtomCluster>> {
         let conn = self
             .db
             .conn
             .lock()
             .map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
-        clustering::compute_atom_clusters(&conn, min_similarity, min_cluster_size)
+        clustering::compute_atom_clusters(&conn, min_similarity, min_cluster_size, algorithm)
             .map_err(|e| AtomicCoreError::Clustering(e))
     }
 
@@ -46,7 +47,7 @@ impl SqliteStorage {
             .unwrap_or(0);
 
         if count == 0 {
-            let clusters = clustering::compute_atom_clusters(&conn, 0.5, 2)
+            let clusters = clustering::compute_atom_clusters(&conn, 0.5, 2, ClusterAlgorithm::default())
                 .map_err(|e| AtomicCoreError::Clustering(e))?;
             clustering::save_cluster_assignments(&conn, &clusters)
                 .map_err(|e| AtomicCoreError::Clustering(e))?;
@@ -102,8 +103,9 @@ impl ClusterStore for SqliteStorage {
         &self,
         min_similarity: f32,
         min_cluster_size: i32,
+        algorithm: ClusterAlgorithm,
     ) -> StorageResult<Vec<AtomCluster>> {
-        self.compute_clusters_sync(min_similarity, min_cluster_size)
+        self.compute_clusters_sync(min_similarity, min_cluster_size, algorithm)
     }
 
     async fn save_clusters(&self, clusters: &[AtomCluster]) -> StorageResult<()> {

@@ -1288,8 +1288,9 @@ impl AtomicCore {
         &self,
         min_similarity: f32,
         min_cluster_size: i32,
+        algorithm: ClusterAlgorithm,
     ) -> Result<Vec<AtomCluster>, AtomicCoreError> {
-        self.storage.compute_clusters_sync(min_similarity, min_cluster_size)
+        self.storage.compute_clusters_sync(min_similarity, min_cluster_size, algorithm)
     }
 
     /// Save cluster assignments to the database
@@ -1436,7 +1437,7 @@ impl AtomicCore {
     /// top-K edges per atom, and cluster centroid labels.
     /// Pure read operation — does not persist positions to the database.
     /// Works with both SQLite and Postgres backends via storage dispatch.
-    pub fn compute_and_get_canvas_data(&self) -> Result<GlobalCanvasData, AtomicCoreError> {
+    pub fn compute_and_get_canvas_data(&self, algorithm: ClusterAlgorithm) -> Result<GlobalCanvasData, AtomicCoreError> {
         // Load all average embeddings via storage abstraction
         let embeddings = self.storage.get_all_embedding_pairs_sync()?;
         if embeddings.is_empty() {
@@ -1477,7 +1478,7 @@ impl AtomicCore {
         let edges = self.storage.get_top_k_canvas_edges_sync(2)?;
 
         // Compute cluster centroids
-        let cluster_data = self.storage.compute_clusters_sync(0.5, 3)?;
+        let cluster_data = self.storage.compute_clusters_sync(0.5, 3, algorithm)?;
         let clusters = Self::build_cluster_centroids(&cluster_data, &position_map);
 
         Ok(GlobalCanvasData { atoms, edges, clusters })

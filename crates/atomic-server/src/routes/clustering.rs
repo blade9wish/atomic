@@ -12,6 +12,8 @@ pub struct ComputeClustersBody {
     pub min_similarity: Option<f32>,
     /// Minimum cluster size (default: 2)
     pub min_cluster_size: Option<i32>,
+    /// Clustering algorithm (default: label_propagation)
+    pub algorithm: Option<atomic_core::ClusterAlgorithm>,
 }
 
 #[utoipa::path(post, path = "/api/clustering/compute", request_body = ComputeClustersBody, responses((status = 200, description = "Computed clusters", body = Vec<atomic_core::AtomCluster>)), tag = "clustering")]
@@ -21,9 +23,10 @@ pub async fn compute_clusters(
 ) -> HttpResponse {
     let min_similarity = body.min_similarity.unwrap_or(0.6);
     let min_cluster_size = body.min_cluster_size.unwrap_or(2);
+    let algorithm = body.algorithm.unwrap_or_default();
     let core = db.0;
     match web::block(move || {
-        let clusters = core.compute_clusters(min_similarity, min_cluster_size)?;
+        let clusters = core.compute_clusters(min_similarity, min_cluster_size, algorithm)?;
         core.save_clusters(&clusters)?;
         Ok::<_, atomic_core::AtomicCoreError>(clusters)
     }).await {

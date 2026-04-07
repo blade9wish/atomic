@@ -658,6 +658,7 @@ pub trait ClusterStore: Send + Sync {
         &self,
         min_similarity: f32,
         min_cluster_size: i32,
+        algorithm: ClusterAlgorithm,
     ) -> StorageResult<Vec<AtomCluster>>;
 
     /// Save computed clusters (replaces existing).
