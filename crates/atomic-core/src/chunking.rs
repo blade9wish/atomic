@@ -24,6 +24,7 @@ const CHARS_PER_TOKEN: usize = 4;
 const TARGET_CHUNK_CHARS: usize = 2500 * CHARS_PER_TOKEN;
 const OVERLAP_CHARS: usize = 200 * CHARS_PER_TOKEN;
 const MIN_CHUNK_CHARS: usize = 100 * CHARS_PER_TOKEN;
+const MAX_CHUNK_CHARS: usize = 3000 * CHARS_PER_TOKEN;
 
 /// Lazily initialized tokenizer (loaded once, reused for all operations)
 static BPE: LazyLock<CoreBPE> = LazyLock::new(|| {
@@ -76,21 +77,37 @@ fn parse_markdown_blocks(content: &str) -> Vec<MarkdownBlock> {
     for (event, range) in parser {
         match event {
             Event::Start(Tag::CodeBlock(_)) => {
-                // Flush any pending block
-                if let Some((bt, start, end)) = current_block.take() {
-                    let text = content[start..end].trim().to_string();
-                    if !text.is_empty() {
-                        blocks.push(MarkdownBlock { block_type: bt, content: text });
+                // If inside a container block (e.g. list), just extend it
+                // rather than splitting the container.
+                if matches!(current_block, Some((BlockType::List, ..))) {
+                    if let Some((_, _, ref mut end)) = current_block {
+                        *end = range.end;
                     }
+                } else {
+                    // Flush any pending block
+                    if let Some((bt, start, end)) = current_block.take() {
+                        let text = content[start..end].trim().to_string();
+                        if !text.is_empty() {
+                            blocks.push(MarkdownBlock { block_type: bt, content: text });
+                        }
+                    }
+                    current_block = Some((BlockType::CodeBlock, range.start, range.end));
                 }
-                current_block = Some((BlockType::CodeBlock, range.start, range.end));
             }
             Event::End(TagEnd::CodeBlock) => {
-                if let Some((BlockType::CodeBlock, start, _)) = current_block.take() {
-                    let text = content[start..range.end].trim().to_string();
-                    if !text.is_empty() {
-                        blocks.push(MarkdownBlock { block_type: BlockType::CodeBlock, content: text });
+                match current_block {
+                    Some((BlockType::List, _, ref mut end)) => {
+                        // Code block ended inside list — just extend the list range
+                        *end = range.end;
                     }
+                    Some((BlockType::CodeBlock, start, _)) => {
+                        current_block = None;
+                        let text = content[start..range.end].trim().to_string();
+                        if !text.is_empty() {
+                            blocks.push(MarkdownBlock { block_type: BlockType::CodeBlock, content: text });
+                        }
+                    }
+                    _ => {}
                 }
             }
             Event::Start(Tag::Heading { .. }) => {
@@ -274,9 +291,14 @@ fn merge_blocks_into_chunks(blocks: Vec<MarkdownBlock>) -> Vec<String> {
                 current_chunk = String::new();
             }
 
-            if block_len > TARGET_CHUNK_CHARS {
+            // Code blocks stay intact even if they exceed MAX_CHUNK_CHARS
+            // (intentional for syntax integrity)
+            if block_len > MAX_CHUNK_CHARS {
+                chunks.push(block.content);
+            } else if block_len > TARGET_CHUNK_CHARS {
                 chunks.push(block.content);
             } else {
+                // Small code block - can be combined
                 current_chunk = block.content;
             }
             continue;
@@ -631,5 +653,33 @@ print("second")
         for split in &splits {
             assert!(split.len() <= 10 || split.len() <= "ñ".len()); // May slightly exceed due to char boundary
         }
+    }
+
+    #[test]
+    fn test_nested_code_in_list() {
+        let content = r#"- Item with code:
+  ```
+  code here
+  ```
+- Next item"#;
+
+        let blocks = parse_markdown_blocks(content);
+
+        // The list should remain a single List block, not be split by the code block
+        let list_blocks: Vec<_> = blocks.iter()
+            .filter(|b| b.block_type == BlockType::List)
+            .collect();
+        assert_eq!(list_blocks.len(), 1, "Should be a single list block");
+
+        let list = &list_blocks[0];
+        assert!(list.content.contains("Item with code"), "List should contain first item");
+        assert!(list.content.contains("code here"), "List should contain code block");
+        assert!(list.content.contains("Next item"), "List should contain item after code");
+
+        // No standalone code blocks should be produced
+        let code_blocks: Vec<_> = blocks.iter()
+            .filter(|b| b.block_type == BlockType::CodeBlock)
+            .collect();
+        assert_eq!(code_blocks.len(), 0, "Code inside list should not produce standalone CodeBlock");
     }
 }
