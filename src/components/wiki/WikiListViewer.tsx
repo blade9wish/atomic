@@ -296,9 +296,6 @@ export function WikiListViewer() {
   return (
     <div className="flex flex-col h-full bg-[var(--color-bg-panel)]">
       <WikiHeader
-        tagName={currentTagName || ''}
-        updatedAt={selectedVersion ? selectedVersion.created_at : currentArticle.article.updated_at}
-        sourceCount={displayCitations.length}
         newAtomsAvailable={selectedVersion ? 0 : (articleStatus?.new_atoms_available || 0)}
         onUpdate={handleUpdate}
         onRegenerate={handleRegenerate}
@@ -333,6 +330,9 @@ export function WikiListViewer() {
             citations={displayCitations}
             wikiLinks={selectedVersion ? [] : wikiLinks}
             relatedTags={selectedVersion ? [] : relatedTags}
+            tagName={currentTagName || ''}
+            updatedAt={selectedVersion ? selectedVersion.created_at : currentArticle.article.updated_at}
+            sourceCount={displayCitations.length}
             onViewAtom={handleViewAtom}
             onNavigateToArticle={(tagId, tagName) => openArticle(tagId, tagName)}
           />

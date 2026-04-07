@@ -646,7 +646,7 @@ pub(crate) async fn update(
         atom_count,
         &ctx.wiki_model,
         &ctx.linkable_article_names,
-        ctx.generation_prompt(),
+        ctx.update_prompt(),
     )
     .await?;
 

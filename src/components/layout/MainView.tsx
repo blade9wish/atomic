@@ -7,8 +7,10 @@ import { SigmaCanvas } from '../canvas/SigmaCanvas';
 import { FAB } from '../ui/FAB';
 import { EmbeddingProgressBanner } from '../ui/EmbeddingProgressBanner';
 import { WikiFullView } from '../wiki/WikiFullView';
+import { WikiArticlesList } from '../wiki/WikiArticlesList';
 import { useAtomsStore } from '../../stores/atoms';
 import { useUIStore } from '../../stores/ui';
+import { isTauri } from '../../lib/platform';
 
 export function MainView() {
   const atoms = useAtomsStore(s => s.atoms);
@@ -36,10 +38,12 @@ export function MainView() {
   );
   const leftPanelOpen = useUIStore(s => s.leftPanelOpen);
   const toggleLeftPanel = useUIStore(s => s.toggleLeftPanel);
+  const wikiSidebarOpen = useUIStore(s => s.wikiSidebarOpen);
+  const toggleWikiSidebar = useUIStore(s => s.toggleWikiSidebar);
   const setViewMode = useUIStore(s => s.setViewMode);
   const openDrawer = useUIStore(s => s.openDrawer);
   const openChatDrawer = useUIStore(s => s.openChatDrawer);
-  const openWikiListDrawer = useUIStore(s => s.openWikiListDrawer);
+
   const openCommandPalette = useUIStore(s => s.openCommandPalette);
 
   const [filterBarOpen, setFilterBarOpen] = useState(false);
@@ -142,9 +146,7 @@ export function MainView() {
     openChatDrawer();
   }, [openChatDrawer]);
 
-  const handleOpenWiki = useCallback(() => {
-    openWikiListDrawer();
-  }, [openWikiListDrawer]);
+
 
   const handleOpenSearch = useCallback(() => {
     openCommandPalette('/');
@@ -160,22 +162,25 @@ export function MainView() {
   const displayCount = isSemanticSearch ? displayAtoms.length : totalCount;
 
   return (
+    <>
     <main className="relative flex-1 flex flex-col h-full bg-[var(--color-bg-main)] overflow-hidden">
       {/* Titlebar row - aligned with traffic lights */}
-      <div className="h-[52px] flex items-center gap-3 px-4 flex-shrink-0">
-        {/* Sidebar toggle — visible on small screens when panel is collapsed */}
-        {!leftPanelOpen && (
-          <button
-            onClick={toggleLeftPanel}
-            className="md:hidden p-1.5 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-            title="Show sidebar"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <line x1="9" y1="3" x2="9" y2="21" />
-            </svg>
-          </button>
-        )}
+      <div className={`h-[52px] flex items-center gap-3 px-4 flex-shrink-0 ${!leftPanelOpen && isTauri() ? 'pl-[78px]' : ''}`}>
+        {/* Left sidebar toggle */}
+        <button
+          onClick={toggleLeftPanel}
+          className={`p-1.5 rounded-md transition-colors ${
+            leftPanelOpen
+              ? 'text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+              : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+          }`}
+          title={leftPanelOpen ? "Hide sidebar" : "Show sidebar"}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="9" y1="3" x2="9" y2="21" />
+          </svg>
+        </button>
 
         {/* View Mode Toggle */}
         <div className="flex items-center bg-[var(--color-bg-card)] rounded-md border border-[var(--color-border)] shrink-0">
@@ -259,17 +264,6 @@ export function MainView() {
           </svg>
         </button>
 
-        {/* Wiki button */}
-        <button
-          onClick={handleOpenWiki}
-          className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-          title="Open wiki articles"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-          </svg>
-        </button>
-
         {/* Chat button */}
         <button
           onClick={handleOpenChat}
@@ -283,6 +277,24 @@ export function MainView() {
 
         {/* Drag region - fills available space */}
         <div data-tauri-drag-region className="flex-1 h-full drag-region" />
+
+        {/* Wiki sidebar toggle — right-aligned, only in wiki view on desktop */}
+        {viewMode === 'wiki' && (
+          <button
+            onClick={toggleWikiSidebar}
+            className={`hidden md:block p-1.5 rounded-md transition-colors ${
+              wikiSidebarOpen
+                ? 'text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+                : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+            }`}
+            title={wikiSidebarOpen ? "Hide article list" : "Show article list"}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+          </button>
+        )}
 
         {/* Filter toggle + atom count — right-aligned, hide for canvas/wiki */}
         {viewMode !== 'canvas' && viewMode !== 'wiki' && (
@@ -363,5 +375,17 @@ export function MainView() {
       {/* Embedding progress overlay */}
       <EmbeddingProgressBanner />
     </main>
+
+    {/* Wiki sidebar — rendered at layout level so border spans full height */}
+    <div
+      className={`hidden md:block flex-shrink-0 border-l border-[var(--color-border)] overflow-hidden bg-[var(--color-bg-main)] transition-[width] duration-300 ease-in-out ${
+        viewMode === 'wiki' && wikiSidebarOpen ? 'w-80' : 'w-0 border-l-0'
+      }`}
+    >
+      <div className="w-80 h-full flex flex-col">
+        <WikiArticlesList />
+      </div>
+    </div>
+    </>
   );
 }

@@ -1,11 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWikiStore } from '../../stores/wiki';
 import { useUIStore } from '../../stores/ui';
 import { WikiArticlesList } from './WikiArticlesList';
-import { WikiHeader } from './WikiHeader';
 import { WikiEmptyState } from './WikiEmptyState';
 import { WikiGenerating } from './WikiGenerating';
 import { WikiArticleContent } from './WikiArticleContent';
+import { Button } from '../ui/Button';
+import { Modal } from '../ui/Modal';
 
 export function WikiFullView() {
   const view = useWikiStore(s => s.view);
@@ -21,18 +22,15 @@ export function WikiFullView() {
   const error = useWikiStore(s => s.error);
   const fetchAllArticles = useWikiStore(s => s.fetchAllArticles);
   const generateArticle = useWikiStore(s => s.generateArticle);
-  const updateArticle = useWikiStore(s => s.updateArticle);
   const openArticle = useWikiStore(s => s.openArticle);
   const goBack = useWikiStore(s => s.goBack);
   const clearError = useWikiStore(s => s.clearError);
 
-  const versions = useWikiStore(s => s.versions);
   const selectedVersion = useWikiStore(s => s.selectedVersion);
-  const selectVersion = useWikiStore(s => s.selectVersion);
-  const clearSelectedVersion = useWikiStore(s => s.clearSelectedVersion);
 
   const openDrawer = useUIStore(s => s.openDrawer);
 
+  const [showRegenerateModal, setShowRegenerateModal] = useState(false);
   const initializedRef = useRef(false);
 
   useEffect(() => {
@@ -44,12 +42,6 @@ export function WikiFullView() {
   const handleGenerate = () => {
     if (currentTagId && currentTagName) {
       generateArticle(currentTagId, currentTagName);
-    }
-  };
-
-  const handleUpdate = () => {
-    if (currentTagId && currentTagName) {
-      updateArticle(currentTagId, currentTagName);
     }
   };
 
@@ -112,43 +104,78 @@ export function WikiFullView() {
 
     return (
       <div className="h-full flex flex-col overflow-hidden">
-        <WikiHeader
-          tagName={currentTagName || ''}
-          updatedAt={selectedVersion ? selectedVersion.created_at : currentArticle.article.updated_at}
-          sourceCount={displayCitations.length}
-          newAtomsAvailable={selectedVersion ? 0 : (articleStatus?.new_atoms_available || 0)}
-          onUpdate={handleUpdate}
-          onRegenerate={handleGenerate}
-          onClose={goBack}
-          isUpdating={isUpdating}
-          versions={versions}
-          onSelectVersion={selectVersion}
-          isViewingVersion={!!selectedVersion}
-          onReturnToCurrent={clearSelectedVersion}
-        />
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto scrollbar-auto-hide">
           <WikiArticleContent
             article={displayArticle}
             citations={displayCitations}
             wikiLinks={selectedVersion ? [] : wikiLinks}
             relatedTags={selectedVersion ? [] : relatedTags}
+            tagName={currentTagName || ''}
+            updatedAt={selectedVersion ? selectedVersion.created_at : currentArticle.article.updated_at}
+            sourceCount={displayCitations.length}
+            titleActions={
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowRegenerateModal(true)}
+                  disabled={isUpdating || !!selectedVersion}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </Button>
+                <button
+                  onClick={goBack}
+                  className="md:hidden text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors p-1"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </>
+            }
             onViewAtom={handleViewAtom}
             onNavigateToArticle={(tagId, tagName) => openArticle(tagId, tagName)}
           />
         </div>
+
+        {/* Regenerate confirmation modal */}
+        <Modal
+          isOpen={showRegenerateModal}
+          onClose={() => setShowRegenerateModal(false)}
+          title="Regenerate Article"
+          confirmLabel="Regenerate"
+          confirmVariant="primary"
+          onConfirm={() => {
+            setShowRegenerateModal(false);
+            handleGenerate();
+          }}
+        >
+          <p className="text-[var(--color-text-primary)]">
+            This will regenerate the article from scratch, replacing the current content.
+            The current version will be saved in the version history.
+            Are you sure you want to continue?
+          </p>
+        </Modal>
       </div>
     );
   };
 
-  return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left panel: article list */}
-      <div className="w-72 flex-shrink-0 border-r border-[var(--color-border)] overflow-hidden">
-        <WikiArticlesList />
-      </div>
+  // On mobile (no sidebar), show the article list when nothing is selected
+  const showMobileList = !currentTagId || view === 'list';
 
-      {/* Right panel: article content */}
-      <div className="flex-1 overflow-hidden">
+  return (
+    <div className="h-full overflow-hidden">
+      {/* On mobile, swap between list and article */}
+      <div className="md:hidden h-full">
+        {showMobileList ? (
+          <WikiArticlesList />
+        ) : (
+          renderArticleContent()
+        )}
+      </div>
+      <div className="hidden md:block h-full">
         {renderArticleContent()}
       </div>
     </div>
