@@ -152,19 +152,11 @@ pub fn louvain(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
     for _ in 0..max_passes {
         let mut improved = false;
 
-        // Compute community aggregates: sum_tot (total incident weight) and sum_in (internal weight)
+        // Compute sum_tot: total incident weight per community
         let mut sum_tot: HashMap<u32, f64> = HashMap::new();
-        let mut sum_in: HashMap<u32, f64> = HashMap::new();
         for node in &sorted_nodes {
             let c = community[node];
             *sum_tot.entry(c).or_default() += k[node];
-        }
-        for (source, target, weight) in edges {
-            let cs = community[source];
-            let ct = community[target];
-            if cs == ct {
-                *sum_in.entry(cs).or_default() += 2.0 * (*weight as f64);
-            }
         }
 
         for node in &sorted_nodes {
@@ -181,9 +173,10 @@ pub fn louvain(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
             }
 
             // Delta Q for removing node from its current community
+            // Standard formula uses (sum_tot[C] - k_i) to exclude node i's own contribution
             let ki_in_current = neighbor_comm_weights.get(&current_comm).copied().unwrap_or(0.0);
             let st_current = sum_tot.get(&current_comm).copied().unwrap_or(0.0);
-            let remove_cost = ki_in_current / two_m - (st_current * ki) / (two_m * two_m);
+            let remove_cost = ki_in_current / two_m - ((st_current - ki) * ki) / (two_m * two_m);
 
             // Find best community to move to
             let mut best_comm = current_comm;
@@ -202,13 +195,9 @@ pub fn louvain(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
             }
 
             if best_comm != current_comm {
-                // Update aggregates
-                let ki = k[node];
+                // Update sum_tot aggregates
                 *sum_tot.entry(current_comm).or_default() -= ki;
                 *sum_tot.entry(best_comm).or_default() += ki;
-                *sum_in.entry(current_comm).or_default() -= 2.0 * ki_in_current;
-                let ki_in_best = neighbor_comm_weights.get(&best_comm).copied().unwrap_or(0.0);
-                *sum_in.entry(best_comm).or_default() += 2.0 * ki_in_best;
 
                 community.insert(node.clone(), best_comm);
                 improved = true;
@@ -237,9 +226,15 @@ pub fn louvain(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
     result
 }
 
-/// Run Leiden community detection on a weighted adjacency list.
-/// Improves on Louvain by adding a refinement phase that ensures
-/// communities are well-connected internally.
+/// Louvain-based community detection with intra-community refinement.
+///
+/// Extends the Louvain algorithm with a refinement phase: after the initial
+/// local-move pass, each community is re-partitioned from singletons using
+/// modularity-guided local moves restricted to that community. This encourages
+/// internally well-connected communities, inspired by (but not identical to)
+/// the Leiden algorithm of Traag et al. 2019 — the published Leiden uses
+/// randomised CPM-gated merging whereas this variant uses deterministic
+/// modularity-based local moves for the refinement step.
 pub fn leiden(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
     if edges.is_empty() {
         return HashMap::new();
@@ -320,7 +315,7 @@ pub fn leiden(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
                     neighbor_comm_weights.get(&current_comm).copied().unwrap_or(0.0);
                 let st_current = sum_tot.get(&current_comm).copied().unwrap_or(0.0);
                 let remove_cost =
-                    ki_in_current / two_m - (st_current * ki) / (two_m * two_m);
+                    ki_in_current / two_m - ((st_current - ki) * ki) / (two_m * two_m);
 
                 let mut best_comm = current_comm;
                 let mut best_gain = 0.0;
@@ -421,7 +416,7 @@ pub fn leiden(edges: &[(String, String, f32)]) -> HashMap<String, u32> {
                         neighbor_sub_weights.get(&current_sub).copied().unwrap_or(0.0);
                     let st_current = sub_sum_tot.get(&current_sub).copied().unwrap_or(0.0);
                     let remove_cost =
-                        ki_in_current / two_m - (st_current * ki) / (two_m * two_m);
+                        ki_in_current / two_m - ((st_current - ki) * ki) / (two_m * two_m);
 
                     let mut best_sub = current_sub;
                     let mut best_gain = 0.0;
