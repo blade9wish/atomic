@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, ReactNode, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, ReactNode, useRef, useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { openExternalUrl } from '../../lib/platform';
@@ -21,6 +21,22 @@ const CHUNK_SIZE = 8000;
 const INITIAL_CHUNKS = 1;
 const CHUNKS_PER_BATCH = 2;
 const CHUNK_DELAY = 32;
+
+const remarkPluginsStable = [remarkGfm];
+
+const MemoizedMarkdownChunk = memo(function MarkdownChunk({
+  content,
+  components,
+}: {
+  content: string;
+  components: any;
+}) {
+  return (
+    <ReactMarkdown remarkPlugins={remarkPluginsStable} components={components}>
+      {content}
+    </ReactMarkdown>
+  );
+});
 
 interface AtomReaderProps {
   atomId: string;
@@ -85,15 +101,6 @@ export function AtomReader({ atomId, highlightText }: AtomReaderProps) {
         .catch(console.error);
     }
   }, [atomId, storeAtomUpdatedAt, isLoadingAtom]);
-
-  // Escape dismisses overlay
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') overlayDismiss();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [overlayDismiss]);
 
   const canGoBack = overlayNav.index > 0;
   const canGoForward = overlayNav.index < overlayNav.stack.length - 1;
@@ -245,10 +252,14 @@ function AtomReaderContent({
         e.preventDefault();
         openSearch();
       }
+      if (e.key === 'Escape') {
+        if (showDeleteModal || isSearchOpen) return; // let inner layer handle it
+        onDismiss();
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [openSearch]);
+  }, [openSearch, showDeleteModal, isSearchOpen, onDismiss]);
 
   // Highlight helpers
   const highlightInitialText = useCallback((text: string): ReactNode => {
@@ -299,11 +310,18 @@ function AtomReaderContent({
       return <code>{wrapWithHighlight(children)}</code>;
     },
     pre: ({ children }: { children?: ReactNode }) => <pre>{children}</pre>,
-    a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-      <a href={href} onClick={(e) => { e.preventDefault(); if (href) openExternalUrl(href).catch(console.error); }} className="cursor-pointer">
-        {wrapWithHighlight(children)}
-      </a>
-    ),
+    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+      // If the link wraps an image, render the image unwrapped
+      const childArray = Array.isArray(children) ? children : [children];
+      if (childArray.some((c: any) => c?.type === MarkdownImage || c?.props?.src)) {
+        return <>{children}</>;
+      }
+      return (
+        <a href={href} onClick={(e) => { e.preventDefault(); if (href) openExternalUrl(href).catch(console.error); }} className="cursor-pointer">
+          {wrapWithHighlight(children)}
+        </a>
+      );
+    },
     img: ({ src, alt }: { src?: string; alt?: string }) => <MarkdownImage src={src} alt={alt} />,
   }), [wrapWithHighlight]);
 
@@ -319,7 +337,7 @@ function AtomReaderContent({
     }
   };
 
-  const proseClasses = `prose ${readerTheme === 'dark' ? 'prose-invert' : ''} max-w-none prose-headings:text-[var(--color-text-primary)] prose-p:text-[var(--color-text-primary)] prose-a:text-[var(--color-text-primary)] prose-a:underline prose-a:decoration-[var(--color-border-hover)] hover:prose-a:decoration-current prose-strong:text-[var(--color-text-primary)] prose-code:text-[var(--color-accent-light)] prose-code:bg-[var(--color-bg-card)] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-[var(--color-bg-card)] prose-pre:border prose-pre:border-[var(--color-border)] prose-blockquote:border-l-[var(--color-accent)] prose-blockquote:text-[var(--color-text-secondary)] prose-li:text-[var(--color-text-primary)] prose-hr:border-[var(--color-border)]`;
+  const proseClasses = `prose ${readerTheme === 'dark' ? 'prose-invert' : ''} max-w-none prose-headings:text-[var(--color-text-primary)] prose-p:text-[var(--color-text-primary)] prose-a:text-[var(--color-text-primary)] prose-a:underline prose-a:decoration-[var(--color-border-hover)] prose-a:hover:decoration-current prose-strong:text-[var(--color-text-primary)] prose-code:text-[var(--color-accent-light)] prose-code:bg-[var(--color-bg-card)] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-[var(--color-bg-card)] prose-pre:border prose-pre:border-[var(--color-border)] prose-blockquote:border-l-[var(--color-accent)] prose-blockquote:text-[var(--color-text-secondary)] prose-li:text-[var(--color-text-primary)] prose-hr:border-[var(--color-border)]`;
 
   return (
     <div
@@ -427,9 +445,7 @@ function AtomReaderContent({
           <div className="flex-1 min-w-0">
             <article ref={articleRef} className={`max-w-3xl ${proseClasses}`}>
               {chunks.slice(0, renderedChunkCount).map((chunk, index) => (
-                <ReactMarkdown key={index} remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                  {chunk}
-                </ReactMarkdown>
+                <MemoizedMarkdownChunk key={index} content={chunk} components={markdownComponents} />
               ))}
 
               <div className="h-8">
@@ -514,6 +530,12 @@ function SidebarRelatedAtoms({ atomId, onAtomClick }: { atomId: string; onAtomCl
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Reset when atomId changes so we re-fetch for the new atom
+  useEffect(() => {
+    setRelatedAtoms([]);
+    setHasLoaded(false);
+  }, [atomId]);
 
   useEffect(() => {
     if (!isCollapsed && !hasLoaded) {
