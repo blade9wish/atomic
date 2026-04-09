@@ -744,6 +744,24 @@ impl SqliteStorage {
         Ok(ids)
     }
 
+    /// Get distinct tag IDs for a batch of atoms in a single query.
+    pub(crate) fn get_tag_ids_for_atoms_batch_impl(&self, atom_ids: &[String]) -> StorageResult<Vec<String>> {
+        if atom_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.db.read_conn()?;
+        let placeholders = atom_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT DISTINCT tag_id FROM atom_tags WHERE atom_id IN ({})",
+            placeholders
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let ids = stmt
+            .query_map(rusqlite::params_from_iter(atom_ids.iter()), |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(ids)
+    }
+
     pub(crate) fn get_atom_content_impl(&self, atom_id: &str) -> StorageResult<Option<String>> {
         let conn = self.db.read_conn()?;
         match conn.query_row(
@@ -938,6 +956,34 @@ impl SqliteStorage {
         Ok(map)
     }
 
+    /// Lightweight canvas metadata: (atom_id, title, primary_tag_name, tag_count).
+    /// No full content, no embedding blobs — just what the canvas needs.
+    pub(crate) fn get_canvas_atom_metadata_light_sync(
+        &self,
+    ) -> StorageResult<Vec<(String, String, Option<String>, i32)>> {
+        let conn = self.db.read_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT a.id, a.title,
+                    (SELECT t.name FROM atom_tags at JOIN tags t ON at.tag_id = t.id
+                     WHERE at.atom_id = a.id LIMIT 1) as primary_tag,
+                    (SELECT COUNT(*) FROM atom_tags at WHERE at.atom_id = a.id) as tag_count
+             FROM atoms a
+             WHERE a.embedding_status = 'complete'"
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i32>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rows)
+    }
+
     pub(crate) fn get_canvas_atom_metadata_sync(&self) -> StorageResult<Vec<CanvasAtomPosition>> {
         let conn = self.db.read_conn()?;
         let mut stmt = conn.prepare(
@@ -1085,5 +1131,9 @@ impl AtomStore for SqliteStorage {
 
     async fn get_canvas_atom_metadata(&self) -> StorageResult<Vec<CanvasAtomPosition>> {
         self.get_canvas_atom_metadata_sync()
+    }
+
+    async fn get_canvas_atom_metadata_light(&self) -> StorageResult<Vec<(String, String, Option<String>, i32)>> {
+        self.get_canvas_atom_metadata_light_sync()
     }
 }
