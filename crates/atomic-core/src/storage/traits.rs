@@ -85,6 +85,17 @@ pub trait AtomStore: Send + Sync {
     /// Get just the tag IDs for an atom (lightweight, no full atom fetch).
     async fn get_atom_tag_ids(&self, atom_id: &str) -> StorageResult<Vec<String>>;
 
+    /// Get distinct tag IDs for a batch of atoms in a single query.
+    async fn get_tag_ids_for_atoms_batch(&self, atom_ids: &[String]) -> StorageResult<Vec<String>> {
+        let mut all = Vec::new();
+        for id in atom_ids {
+            all.extend(self.get_atom_tag_ids(id).await?);
+        }
+        all.sort();
+        all.dedup();
+        Ok(all)
+    }
+
     /// Get just the content for an atom (lightweight, for embedding pipeline).
     async fn get_atom_content(&self, atom_id: &str) -> StorageResult<Option<String>>;
 
@@ -234,6 +245,19 @@ pub trait ChunkStore: Send + Sync {
         error: Option<&str>,
     ) -> StorageResult<()>;
 
+    /// Mark embedding status for multiple atoms in a single operation.
+    async fn set_embedding_status_batch(
+        &self,
+        atom_ids: &[String],
+        status: &str,
+        error: Option<&str>,
+    ) -> StorageResult<()> {
+        for id in atom_ids {
+            self.set_embedding_status(id, status, error).await?;
+        }
+        Ok(())
+    }
+
     /// Mark an atom's tagging status.
     async fn set_tagging_status(
         &self,
@@ -248,6 +272,20 @@ pub trait ChunkStore: Send + Sync {
         atom_id: &str,
         chunks: &[(String, Vec<f32>)], // (chunk_content, embedding)
     ) -> StorageResult<()>;
+
+    /// Save chunks and embeddings for multiple atoms in a single transaction.
+    async fn save_chunks_and_embeddings_batch(
+        &self,
+        atoms: &[(String, Vec<(String, Vec<f32>)>)],
+    ) -> StorageResult<Vec<String>> {
+        let mut succeeded = Vec::new();
+        for (atom_id, chunks) in atoms {
+            if self.save_chunks_and_embeddings(atom_id, chunks).await.is_ok() {
+                succeeded.push(atom_id.clone());
+            }
+        }
+        Ok(succeeded)
+    }
 
     /// Delete all chunks and embeddings for an atom.
     async fn delete_chunks(&self, atom_id: &str) -> StorageResult<()>;
@@ -308,6 +346,21 @@ pub trait ChunkStore: Send + Sync {
         threshold: f32,
         max_edges: i32,
     ) -> StorageResult<i32>;
+
+    /// Compute semantic edges for a batch of atoms in a single transaction.
+    async fn compute_semantic_edges_batch(
+        &self,
+        atom_ids: &[String],
+        threshold: f32,
+        max_edges: i32,
+    ) -> StorageResult<i32> {
+        // Default implementation: process one at a time
+        let mut total = 0;
+        for atom_id in atom_ids {
+            total += self.compute_semantic_edges_for_atom(atom_id, threshold, max_edges).await?;
+        }
+        Ok(total)
+    }
 
     /// Rebuild the full-text search index (SQLite: FTS5 rebuild, Postgres: no-op since tsvector is auto-maintained).
     async fn rebuild_fts_index(&self) -> StorageResult<()>;

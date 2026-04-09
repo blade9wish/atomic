@@ -744,6 +744,24 @@ impl SqliteStorage {
         Ok(ids)
     }
 
+    /// Get distinct tag IDs for a batch of atoms in a single query.
+    pub(crate) fn get_tag_ids_for_atoms_batch_impl(&self, atom_ids: &[String]) -> StorageResult<Vec<String>> {
+        if atom_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.db.read_conn()?;
+        let placeholders = atom_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT DISTINCT tag_id FROM atom_tags WHERE atom_id IN ({})",
+            placeholders
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let ids = stmt
+            .query_map(rusqlite::params_from_iter(atom_ids.iter()), |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(ids)
+    }
+
     pub(crate) fn get_atom_content_impl(&self, atom_id: &str) -> StorageResult<Option<String>> {
         let conn = self.db.read_conn()?;
         match conn.query_row(

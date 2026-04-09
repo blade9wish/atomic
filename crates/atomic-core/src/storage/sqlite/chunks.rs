@@ -41,6 +41,39 @@ impl SqliteStorage {
         Ok(())
     }
 
+    /// Set embedding status for multiple atoms in a single statement.
+    pub(crate) fn set_embedding_status_batch_sync(
+        &self,
+        atom_ids: &[String],
+        status: &str,
+        error: Option<&str>,
+    ) -> StorageResult<()> {
+        if atom_ids.is_empty() {
+            return Ok(());
+        }
+        let conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
+        let placeholders = atom_ids.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + 3))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "UPDATE atoms SET embedding_status = ?1, embedding_error = ?2 WHERE id IN ({})",
+            placeholders
+        );
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(2 + atom_ids.len());
+        params.push(Box::new(status.to_string()));
+        params.push(Box::new(error.map(|e| e.to_string())));
+        for id in atom_ids {
+            params.push(Box::new(id.clone()));
+        }
+        conn.execute(&sql, rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())))?;
+        Ok(())
+    }
+
     pub(crate) fn set_tagging_status_sync(
         &self,
         atom_id: &str,
@@ -69,7 +102,47 @@ impl SqliteStorage {
             .conn
             .lock()
             .map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
+        Self::save_chunks_for_atom(&conn, atom_id, chunks)
+    }
 
+    /// Save chunks and embeddings for multiple atoms in a single transaction.
+    /// Each entry is (atom_id, chunks). One lock acquire, one fsync.
+    pub(crate) fn save_chunks_and_embeddings_batch_sync(
+        &self,
+        atoms: &[(String, Vec<(String, Vec<f32>)>)],
+    ) -> StorageResult<Vec<String>> {
+        if atoms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
+        let tx = conn.transaction()
+            .map_err(|e| AtomicCoreError::DatabaseOperation(e.to_string()))?;
+
+        let mut succeeded = Vec::new();
+        for (atom_id, chunks) in atoms {
+            match Self::save_chunks_for_atom(&tx, atom_id, chunks) {
+                Ok(()) => succeeded.push(atom_id.clone()),
+                Err(e) => {
+                    tracing::warn!(atom_id = %atom_id, error = %e, "Failed to save chunks for atom");
+                }
+            }
+        }
+
+        tx.commit()
+            .map_err(|e| AtomicCoreError::DatabaseOperation(e.to_string()))?;
+        Ok(succeeded)
+    }
+
+    /// Inner helper: save chunks for a single atom on an existing connection/transaction.
+    fn save_chunks_for_atom(
+        conn: &rusqlite::Connection,
+        atom_id: &str,
+        chunks: &[(String, Vec<f32>)],
+    ) -> StorageResult<()> {
         // Remove old FTS entries before deleting chunks
         conn.execute(
             "INSERT INTO atom_chunks_fts(atom_chunks_fts, rowid, id, atom_id, chunk_index, content)
@@ -371,17 +444,28 @@ impl SqliteStorage {
         atom_ids: &[String],
         status: &str,
     ) -> StorageResult<()> {
+        if atom_ids.is_empty() {
+            return Ok(());
+        }
         let conn = self
             .db
             .conn
             .lock()
             .map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
-        let mut stmt = conn.prepare(
-            "UPDATE atoms SET edges_status = ?1 WHERE id = ?2",
-        )?;
-        for atom_id in atom_ids {
-            stmt.execute(rusqlite::params![status, atom_id])?;
+        let placeholders = atom_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE atoms SET edges_status = ?1 WHERE id IN ({})",
+            placeholders
+        );
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(1 + atom_ids.len());
+        params.push(Box::new(status.to_string()));
+        for id in atom_ids {
+            params.push(Box::new(id.clone()));
         }
+        conn.execute(
+            &sql,
+            rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
+        )?;
         Ok(())
     }
 
@@ -397,30 +481,38 @@ impl SqliteStorage {
     }
 
     pub(crate) fn delete_chunks_batch_sync(&self, atom_ids: &[String]) -> StorageResult<()> {
-        let conn = self
+        if atom_ids.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self
             .db
             .conn
             .lock()
             .map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
 
+        let tx = conn.transaction()
+            .map_err(|e| AtomicCoreError::DatabaseOperation(e.to_string()))?;
+
         for atom_id in atom_ids {
             // Remove FTS entries
-            conn.execute(
+            tx.execute(
                 "INSERT INTO atom_chunks_fts(atom_chunks_fts, rowid, id, atom_id, chunk_index, content)
                  SELECT 'delete', rowid, id, atom_id, chunk_index, content FROM atom_chunks WHERE atom_id = ?1",
                 [atom_id],
             )
             .ok();
 
-            conn.execute(
+            tx.execute(
                 "DELETE FROM vec_chunks WHERE chunk_id IN (SELECT id FROM atom_chunks WHERE atom_id = ?1)",
                 [atom_id],
             )
             .ok();
 
-            conn.execute("DELETE FROM atom_chunks WHERE atom_id = ?1", [atom_id])?;
+            tx.execute("DELETE FROM atom_chunks WHERE atom_id = ?1", [atom_id])?;
         }
 
+        tx.commit()
+            .map_err(|e| AtomicCoreError::DatabaseOperation(e.to_string()))?;
         Ok(())
     }
 
@@ -437,6 +529,35 @@ impl SqliteStorage {
             .map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
         embedding::compute_semantic_edges_for_atom(&conn, atom_id, threshold, max_edges)
             .map_err(|e| AtomicCoreError::Embedding(e))
+    }
+
+    /// Compute semantic edges for a batch of atoms in a single transaction.
+    /// Returns total number of edges created across all atoms.
+    pub(crate) fn compute_semantic_edges_batch_sync(
+        &self,
+        atom_ids: &[String],
+        threshold: f32,
+        max_edges: i32,
+    ) -> StorageResult<i32> {
+        let mut conn = self
+            .db
+            .conn
+            .lock()
+            .map_err(|e| AtomicCoreError::Lock(e.to_string()))?;
+        let tx = conn.transaction()
+            .map_err(|e| AtomicCoreError::DatabaseOperation(e.to_string()))?;
+        let mut total_edges = 0;
+        for atom_id in atom_ids {
+            match embedding::compute_semantic_edges_for_atom(&tx, atom_id, threshold, max_edges) {
+                Ok(count) => total_edges += count,
+                Err(e) => {
+                    tracing::warn!(atom_id = %atom_id, error = %e, "Failed to compute edges for atom");
+                }
+            }
+        }
+        tx.commit()
+            .map_err(|e| AtomicCoreError::DatabaseOperation(e.to_string()))?;
+        Ok(total_edges)
     }
 
     pub(crate) fn rebuild_fts_index_sync(&self) -> StorageResult<()> {
