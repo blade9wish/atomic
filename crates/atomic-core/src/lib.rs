@@ -109,6 +109,10 @@ pub struct AtomicCore {
     /// created lazily and persist for the lifetime of the process — the
     /// working set is bounded by the number of wiki articles touched.
     wiki_tag_locks: Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    /// Cached global canvas data. Cleared on any mutation that affects the canvas
+    /// (atom CRUD, embedding/edge completion, tag changes). Recomputed lazily on
+    /// the next GET /api/canvas/global request.
+    canvas_cache: Arc<std::sync::Mutex<Option<GlobalCanvasData>>>,
 }
 
 impl AtomicCore {
@@ -120,6 +124,7 @@ impl AtomicCore {
             storage,
             registry: None,
             wiki_tag_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            canvas_cache: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -187,6 +192,7 @@ impl AtomicCore {
             storage,
             registry,
             wiki_tag_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            canvas_cache: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -197,6 +203,7 @@ impl AtomicCore {
             storage: storage::StorageBackend::Postgres(pg),
             registry: None,
             wiki_tag_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            canvas_cache: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -315,6 +322,7 @@ impl AtomicCore {
             storage,
             registry,
             wiki_tag_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            canvas_cache: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -474,6 +482,7 @@ impl AtomicCore {
         let content = request.content.clone();
 
         let atom_with_tags = self.storage.insert_atom_impl(&id, &request, &now)?;
+        self.invalidate_canvas_cache();
 
         // Spawn embedding task (non-blocking)
         embedding::spawn_embedding_task_single_with_settings(
@@ -545,6 +554,9 @@ impl AtomicCore {
 
         // Bulk insert via storage
         let atoms_with_tags = self.storage.insert_atoms_bulk_impl(&atoms_to_insert)?;
+        if !atoms_with_tags.is_empty() {
+            self.invalidate_canvas_cache();
+        }
 
         // Collect atom IDs for background embedding (don't clone content — read from DB later)
         let atom_ids: Vec<String> = atoms_with_tags
@@ -623,6 +635,7 @@ impl AtomicCore {
         let content = request.content.clone();
 
         let atom_with_tags = self.storage.update_atom_impl(id, &request, &now)?;
+        self.invalidate_canvas_cache();
 
         // Spawn embedding task (non-blocking)
         embedding::spawn_embedding_task_single_with_settings(
@@ -638,7 +651,11 @@ impl AtomicCore {
 
     /// Delete an atom
     pub fn delete_atom(&self, id: &str) -> Result<(), AtomicCoreError> {
-        self.storage.delete_atom_impl(id)
+        let result = self.storage.delete_atom_impl(id);
+        if result.is_ok() {
+            self.invalidate_canvas_cache();
+        }
+        result
     }
 
     /// Get atoms by tag (includes atoms with descendant tags)
@@ -708,12 +725,16 @@ impl AtomicCore {
         name: &str,
         parent_id: Option<&str>,
     ) -> Result<Tag, AtomicCoreError> {
-        self.storage.update_tag_impl(id, name, parent_id)
+        let result = self.storage.update_tag_impl(id, name, parent_id)?;
+        self.invalidate_canvas_cache();
+        Ok(result)
     }
 
     /// Delete a tag
     pub fn delete_tag(&self, id: &str, recursive: bool) -> Result<(), AtomicCoreError> {
-        self.storage.delete_tag_impl(id, recursive)
+        self.storage.delete_tag_impl(id, recursive)?;
+        self.invalidate_canvas_cache();
+        Ok(())
     }
 
     // ==================== Search Operations ====================
@@ -1156,9 +1177,18 @@ impl AtomicCore {
 
     /// Process all atoms with pending edge computation in batches.
     /// Runs in the background with checkpointing so it survives restarts.
+    /// Invalidates the canvas cache when complete.
     pub fn process_pending_edges(&self) -> Result<i32, AtomicCoreError> {
-        embedding::process_pending_edges(self.storage.clone())
-            .map_err(|e| AtomicCoreError::Embedding(e))
+        let cache = self.canvas_cache.clone();
+        embedding::process_pending_edges_with_callback(
+            self.storage.clone(),
+            Some(move || {
+                if let Ok(mut c) = cache.lock() {
+                    *c = None;
+                }
+            }),
+        )
+        .map_err(|e| AtomicCoreError::Embedding(e))
     }
 
     /// Reset atoms stuck in 'processing' state back to 'pending'
@@ -1237,6 +1267,9 @@ impl AtomicCore {
     {
         let atom_ids = self.storage.claim_all_for_reembedding_sync()?;
         let count = atom_ids.len() as i32;
+        if count > 0 {
+            self.invalidate_canvas_cache();
+        }
 
         if count > 0 {
             let storage_clone = self.storage.clone();
@@ -1471,7 +1504,21 @@ impl AtomicCore {
     /// top-K edges per atom, and cluster centroid labels.
     /// Pure read operation — does not persist positions to the database.
     /// Works with both SQLite and Postgres backends via storage dispatch.
+    /// Clear the cached global canvas data, forcing recomputation on next request.
+    pub fn invalidate_canvas_cache(&self) {
+        if let Ok(mut cache) = self.canvas_cache.lock() {
+            *cache = None;
+        }
+    }
+
     pub fn compute_and_get_canvas_data(&self) -> Result<GlobalCanvasData, AtomicCoreError> {
+        // Return cached data if available
+        if let Ok(cache) = self.canvas_cache.lock() {
+            if let Some(ref data) = *cache {
+                return Ok(data.clone());
+            }
+        }
+
         // Load all average embeddings via storage abstraction (single scan of atom_chunks)
         let embeddings = self.storage.get_all_embedding_pairs_sync()?;
         if embeddings.is_empty() {
@@ -1519,7 +1566,14 @@ impl AtomicCore {
         let cluster_data = self.storage.enrich_clusters_with_tags_sync(cluster_data)?;
         let clusters = Self::build_cluster_centroids(&cluster_data, &position_map);
 
-        Ok(GlobalCanvasData { atoms, edges, clusters })
+        let result = GlobalCanvasData { atoms, edges, clusters };
+
+        // Cache the result for subsequent requests
+        if let Ok(mut cache) = self.canvas_cache.lock() {
+            *cache = Some(result.clone());
+        }
+
+        Ok(result)
     }
 
     /// Filter edges to keep at most top_k per atom, input must be sorted by score DESC.
@@ -1616,6 +1670,7 @@ impl AtomicCore {
 
     /// Rebuild semantic edges for all atoms with embeddings
     pub fn rebuild_semantic_edges(&self) -> Result<i32, AtomicCoreError> {
+        self.invalidate_canvas_cache();
         self.storage.rebuild_semantic_edges_sync()
     }
 

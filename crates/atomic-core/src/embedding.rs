@@ -1691,6 +1691,18 @@ const EDGE_BATCH_SIZE: i32 = 500;
 /// complete, and repeats. Each batch is checkpointed so progress survives restarts.
 /// Returns the total number of atoms processed.
 pub fn process_pending_edges(storage: StorageBackend) -> Result<i32, String> {
+    process_pending_edges_with_callback(storage, None::<fn()>)
+}
+
+/// Like `process_pending_edges` but calls `on_complete` when the pipeline finishes.
+/// Used to invalidate caches that depend on edge data.
+pub fn process_pending_edges_with_callback<F>(
+    storage: StorageBackend,
+    on_complete: Option<F>,
+) -> Result<i32, String>
+where
+    F: Fn() + Send + Sync + 'static,
+{
     let pending_count = storage.count_pending_edges_sync()
         .map_err(|e| e.to_string())?;
 
@@ -1746,6 +1758,11 @@ pub fn process_pending_edges(storage: StorageBackend) -> Result<i32, String> {
         }
 
         tracing::info!(total = total_processed, "Edge computation pipeline complete");
+
+        // Notify caller (e.g. to invalidate canvas cache)
+        if let Some(ref cb) = on_complete {
+            cb();
+        }
     });
 
     Ok(pending_count)
