@@ -2,6 +2,12 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.21.2 — 2026-04-12
+
+- Add resizable chat sidebar with drag handle, default width increased to 480px (adjustable 320–800px), persisted across sessions
+- Add animated thinking indicator with live retrieval step display while the chat agent searches your knowledge base
+- Persist active chat conversation so reopening the sidebar or refreshing restores where you left off
+
 ## v1.21.1 — 2026-04-12
 
 - Improve canvas label readability by preventing overlapping atom and cluster labels — largest nodes are prioritized in dense regions
