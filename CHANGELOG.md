@@ -2,6 +2,10 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.21.1 — 2026-04-12
+
+- Improve canvas label readability by preventing overlapping atom and cluster labels — largest nodes are prioritized in dense regions
+
 ## v1.21.0 — 2026-04-11
 
 - Add Dashboard view with AI daily briefing — a new home screen featuring a scheduled, LLM-generated summary of recently captured atoms with clickable inline citations and an embedded canvas preview
