@@ -1005,7 +1005,17 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
   const handleMcpExpand = async () => {
     const newState = !showMcpSetup;
     setShowMcpSetup(newState);
-    if (newState && !mcpConfig && isDesktopApp() && isLocalServer()) {
+    if (!newState) return;
+
+    const nowLocal = isDesktopApp() && isLocalServer();
+    // Invalidate stale config if mode has flipped (e.g. switched servers)
+    const configIsStdio = mcpConfig && 'command' in (mcpConfig as any).mcpServers.atomic;
+    if ((nowLocal && !configIsStdio && mcpConfig) || (!nowLocal && configIsStdio)) {
+      setMcpConfig(null);
+      setMcpTokenError(null);
+    }
+
+    if (nowLocal && !mcpConfig) {
       const bridgePath = await getMcpBridgePath();
       if (bridgePath) {
         setMcpConfig(getMcpStdioConfig(bridgePath));
