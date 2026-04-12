@@ -14,6 +14,10 @@ Atomic stores knowledge as **atoms** — markdown notes that are automatically c
 
 https://github.com/user-attachments/assets/e8cd771f-6e23-46cf-86d1-3c70cb8d1954
 
+*Daily briefing — AI summary of recent atoms with inline citations that highlight the source on a mini-canvas*
+
+https://github.com/user-attachments/assets/282da0e3-4969-42dd-b591-7da974078e87
+
 *Atoms — markdown notes with tags, sources, and neighborhood graph*
 
 ![Atom Viewer](./docs/images/atom.png)
