@@ -14,6 +14,7 @@ export function ChatViewer() {
   const setChatSidebarOpen = useUIStore(s => s.setChatSidebarOpen);
   const initialTagId = useUIStore(s => s.chatSidebarInitialTagId);
   const initialConversationId = useUIStore(s => s.chatSidebarInitialConversationId);
+  const lastConversationId = useUIStore(s => s.chatSidebarConversationId);
   const activeDbId = useDatabasesStore(s => s.activeId);
   const initializedRef = useRef(false);
 
@@ -33,10 +34,14 @@ export function ChatViewer() {
       openOrCreateForTag(initialTagId);
       useUIStore.getState().clearChatSidebarInitial();
     } else if (!initializedRef.current) {
-      showList();
+      if (lastConversationId) {
+        openConversation(lastConversationId);
+      } else {
+        showList();
+      }
     }
     initializedRef.current = true;
-  }, [initialTagId, initialConversationId, showList, openConversation, openOrCreateForTag]);
+  }, [initialTagId, initialConversationId, lastConversationId, showList, openConversation, openOrCreateForTag]);
 
   return (
     <div className="h-full flex flex-col bg-[var(--color-bg-panel)]">

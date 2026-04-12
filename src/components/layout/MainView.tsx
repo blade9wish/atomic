@@ -89,7 +89,10 @@ export function MainView() {
   const openCommandPalette = useUIStore(s => s.openCommandPalette);
 
   const chatSidebarOpen = useUIStore(s => s.chatSidebarOpen);
+  const chatSidebarWidth = useUIStore(s => s.chatSidebarWidth);
+  const setChatSidebarWidth = useUIStore(s => s.setChatSidebarWidth);
   const toggleChatSidebar = useUIStore(s => s.toggleChatSidebar);
+  const [isResizingChat, setIsResizingChat] = useState(false);
 
   const [filterBarOpen, setFilterBarOpen] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -228,7 +231,30 @@ export function MainView() {
     toggleChatSidebar();
   }, [toggleChatSidebar]);
 
+  const handleChatResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = useUIStore.getState().chatSidebarWidth;
+    setIsResizingChat(true);
 
+    const onMouseMove = (e: MouseEvent) => {
+      const delta = startX - e.clientX;
+      setChatSidebarWidth(startWidth + delta);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      setIsResizingChat(false);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [setChatSidebarWidth]);
 
   const handleOpenSearch = useCallback(() => {
     openCommandPalette('/');
@@ -694,14 +720,21 @@ export function MainView() {
         Mobile: fixed overlay that slides in from the right. */}
     <div
       className={`
-        flex-shrink-0 border-l border-[var(--color-border)] bg-[var(--color-bg-panel)] overflow-hidden
+        relative flex-shrink-0 border-l border-[var(--color-border)] bg-[var(--color-bg-panel)] overflow-hidden
         max-md:fixed max-md:top-0 max-md:right-0 max-md:h-full max-md:w-full max-md:z-40 max-md:shadow-2xl
-        transition-[width,transform] duration-300 ease-in-out
+        md:w-[var(--chat-w)]
+        ${isResizingChat ? '' : 'transition-[width,transform] duration-300 ease-in-out'}
         ${chatSidebarOpen ? 'max-md:translate-x-0' : 'max-md:translate-x-full'}
-        ${chatSidebarOpen ? 'md:w-96' : 'md:w-0 md:border-l-0'}
+        ${chatSidebarOpen ? '' : 'md:!w-0 md:border-l-0'}
       `}
+      style={{ '--chat-w': `${chatSidebarWidth}px` } as React.CSSProperties}
     >
-      <div className="w-full md:w-96 h-full">
+      {/* Resize handle — desktop only */}
+      <div
+        className="hidden md:block absolute left-0 top-0 h-full w-1.5 cursor-col-resize z-10 hover:bg-[var(--color-accent)]/20 active:bg-[var(--color-accent)]/30"
+        onMouseDown={handleChatResizeStart}
+      />
+      <div className="w-full md:min-w-[var(--chat-w)] h-full">
         <ChatViewer />
       </div>
     </div>

@@ -73,6 +73,8 @@ interface UIStore {
   wikiSidebarOpen: boolean;
   // Chat sidebar state
   chatSidebarOpen: boolean;
+  chatSidebarWidth: number;
+  chatSidebarConversationId: string | null;
   chatSidebarInitialTagId: string | null;
   chatSidebarInitialConversationId: string | null;
   // Server connection state
@@ -112,6 +114,8 @@ interface UIStore {
   // Chat sidebar actions
   toggleChatSidebar: () => void;
   setChatSidebarOpen: (open: boolean) => void;
+  setChatSidebarWidth: (width: number) => void;
+  setChatSidebarConversationId: (id: string | null) => void;
   openChatSidebar: (tagId?: string, conversationId?: string) => void;
   clearChatSidebarInitial: () => void;
   setViewMode: (mode: ViewMode) => void;
@@ -178,6 +182,8 @@ export const useUIStore = create<UIStore>()(
       leftPanelOpenBeforeReader: false,
       wikiSidebarOpen: true,
       chatSidebarOpen: false,
+      chatSidebarWidth: 480,
+      chatSidebarConversationId: null,
       chatSidebarInitialTagId: null,
       chatSidebarInitialConversationId: null,
       serverConnected: false,
@@ -429,6 +435,8 @@ export const useUIStore = create<UIStore>()(
       // Chat sidebar actions
       toggleChatSidebar: () => set((state) => ({ chatSidebarOpen: !state.chatSidebarOpen })),
       setChatSidebarOpen: (open: boolean) => set({ chatSidebarOpen: open }),
+      setChatSidebarWidth: (width: number) => set({ chatSidebarWidth: Math.min(Math.max(width, 320), 800) }),
+      setChatSidebarConversationId: (id: string | null) => set({ chatSidebarConversationId: id }),
       openChatSidebar: (tagId?: string, conversationId?: string) =>
         set({
           chatSidebarOpen: true,
@@ -552,6 +560,8 @@ export const useUIStore = create<UIStore>()(
         atomsLayout: state.atomsLayout,
         readerTheme: state.readerTheme,
         chatSidebarOpen: state.chatSidebarOpen,
+        chatSidebarWidth: state.chatSidebarWidth,
+        chatSidebarConversationId: state.chatSidebarConversationId,
       }),
       // v0 → v1: 'grid' and 'list' were top-level ViewMode values. They're now
       // collapsed into a single 'atoms' view with a separate atomsLayout field.

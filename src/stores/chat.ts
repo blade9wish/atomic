@@ -154,6 +154,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       currentConversation: null,
       messages: [],
     });
+    useUIStore.getState().setChatSidebarConversationId(null);
     get().fetchConversations(filterTagId);
   },
 
@@ -177,6 +178,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           messages: result.messages,
           isLoading: false,
         });
+        useUIStore.getState().setChatSidebarConversationId(id);
       } else {
         set({ error: 'Conversation not found', isLoading: false });
       }
@@ -221,6 +223,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       streamingContent: '',
       retrievalSteps: [],
     });
+    useUIStore.getState().setChatSidebarConversationId(null);
     get().fetchConversations(listFilterTagId ?? undefined);
   },
 
