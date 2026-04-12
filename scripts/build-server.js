@@ -55,7 +55,8 @@ function main() {
     process.exit(1);
   }
 
-  const ext = process.platform === 'win32' ? '.exe' : '';
+  const targetIsWindows = target.includes('windows');
+  const ext = targetIsWindows ? '.exe' : '';
   const destDir = join(projectRoot, 'src-tauri', 'binaries');
 
   // Create binaries directory if needed
@@ -83,7 +84,7 @@ function main() {
       process.exit(1);
     }
 
-    const binaryName = process.platform === 'win32' ? `${crate}.exe` : crate;
+    const binaryName = targetIsWindows ? `${crate}.exe` : crate;
     const sourcePath = join(projectRoot, 'target', target, 'release', binaryName);
     const destPath = join(destDir, `${crate}-${target}${ext}`);
 

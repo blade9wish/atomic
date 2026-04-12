@@ -34,7 +34,7 @@ function copyToClipboard(text: string) {
 }
 
 function getServerInfo() {
-  if (isDesktopApp()) {
+  if (isDesktopApp() && isLocalServer()) {
     const localConfig = getLocalServerConfig();
     return {
       url: localConfig?.baseUrl || 'http://127.0.0.1:44380',
