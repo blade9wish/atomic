@@ -2,6 +2,15 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.21.5 — 2026-04-13
+
+- Add chat view to the Obsidian plugin with streaming messages, conversation history, and tag-scoped conversations
+- Upgrade chat tool-call display: each retrieval step now shows as a persistent, collapsible card with status icon, tool name, and pretty-printed input/output — visible during streaming and preserved after completion
+- Improve Obsidian wiki view with clickable citation cross-navigation, loading spinner, and filtered tag selector
+- Fix canvas edges not appearing on initial load until a theme change
+- Fix crash when viewing an empty atom via the MCP agent tools, and add pagination for large atoms to prevent context overflow
+- Remove ~2,600 lines of unused legacy canvas views, drawer, and wiki components
+
 ## v1.21.4 — 2026-04-12
 
 - Add URL-based routing — views, tag filters, and open atoms/wikis are now reflected in the URL, enabling browser back/forward navigation and deep links
