@@ -57,7 +57,7 @@ import {
   type FeedPollResult,
 } from '../../lib/api';
 import { getTransport, switchTransport, switchToLocal, isDesktopApp, isLocalServer, getMcpBridgePath, type HttpTransportConfig } from '../../lib/transport';
-import { pickDirectory, isMacOS } from '../../lib/platform';
+import { pickDirectory, isMacOS, getAppleNotesPath } from '../../lib/platform';
 import { importMarkdownFolder, type ImportProgress } from '../../lib/import';
 import { importAppleNotes } from '../../lib/import-apple-notes';
 import { formatRelativeDate } from '../../lib/date';
@@ -484,8 +484,13 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     }
   }, [isOpen, initialTab]);
 
+  // Integrations tab: collapsible sections — only one open at a time.
+  const [expandedIntegration, setExpandedIntegration] = useState<
+    'markdown' | 'apple-notes' | 'mcp' | null
+  >(null);
+
   // MCP setup state
-  const [showMcpSetup, setShowMcpSetup] = useState(false);
+  const showMcpSetup = expandedIntegration === 'mcp';
   const [mcpConfig, setMcpConfig] = useState<McpConfig | null>(null);
   const [mcpConfigCopied, setMcpConfigCopied] = useState(false);
   const [isCreatingMcpToken, setIsCreatingMcpToken] = useState(false);
@@ -1002,14 +1007,14 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     }
   };
 
-  // Handle MCP setup expand
-  const handleMcpExpand = async () => {
-    const newState = !showMcpSetup;
-    setShowMcpSetup(newState);
-    if (!newState) return;
+  // Toggle a section in the Integrations tab. When opening the MCP section,
+  // also lazy-load the bridge config.
+  const toggleIntegration = async (key: 'markdown' | 'apple-notes' | 'mcp') => {
+    const opening = expandedIntegration !== key;
+    setExpandedIntegration(opening ? key : null);
+    if (!(opening && key === 'mcp')) return;
 
     const nowLocal = isDesktopApp() && isLocalServer();
-    // Invalidate stale config if mode has flipped (e.g. switched servers)
     const configIsStdio = mcpConfig && 'command' in (mcpConfig as any).mcpServers.atomic;
     if ((nowLocal && !configIsStdio && mcpConfig) || (!nowLocal && configIsStdio)) {
       setMcpConfig(null);
@@ -1095,7 +1100,11 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     setImportProgress(null);
 
     try {
-      const selected = await pickDirectory('Select "group.com.apple.notes" folder');
+      const defaultPath = await getAppleNotesPath();
+      const selected = await pickDirectory(
+        'Confirm Apple Notes data folder',
+        defaultPath ? { defaultPath } : undefined,
+      );
       if (!selected) return;
 
       setIsImporting(true);
@@ -2366,52 +2375,126 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
               {/* ===== INTEGRATIONS TAB ===== */}
               {activeTab === 'integrations' && (
                 <>
-                  {/* Import Section — desktop only (reads files locally, creates atoms via API) */}
+                  {/* Shared import status (used by both Markdown and Apple Notes) */}
+                  {(importResult || importError) && (
+                    <div className="space-y-2">
+                      {importResult && (
+                        <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-md text-sm">
+                          <div className="text-green-400 font-medium mb-1">Import complete!</div>
+                          <div className="text-[var(--color-text-secondary)] space-y-0.5">
+                            <div>Imported: {importResult.imported} notes</div>
+                            {importResult.tags_created > 0 && (
+                              <div>Tags created: {importResult.tags_created}</div>
+                            )}
+                            {importResult.errors > 0 && (
+                              <div>Errors: {importResult.errors} (failed to create)</div>
+                            )}
+                            {importResult.skipped > 0 && (
+                              <div>Skipped: {importResult.skipped} (duplicates/empty)</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {importError && (
+                        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-md text-sm">
+                          <div className="text-red-400 font-medium mb-1">Import failed</div>
+                          <div className="text-[var(--color-text-secondary)]">{importError}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Markdown folder — desktop only */}
                   {isDesktopApp() && (
                     <div className="space-y-3">
-                      <div className="space-y-1">
-                        <label className="block text-sm font-medium text-[var(--color-text-primary)]">
-                          Import Notes
-                        </label>
-                        <p className="text-xs text-[var(--color-text-secondary)]">
-                          Import notes from other applications
-                        </p>
-                      </div>
-
-                      <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={importTags}
-                          onChange={(e) => setImportTags(e.target.checked)}
-                          disabled={isImporting}
-                          className="rounded border-[var(--color-border)]"
-                        />
-                        Import tags from folders and frontmatter
-                      </label>
-
-                      <Button
-                        variant="secondary"
-                        onClick={handleObsidianImport}
-                        disabled={isImporting}
-                        className="w-full justify-center"
+                      <button
+                        type="button"
+                        onClick={() => toggleIntegration('markdown')}
+                        className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)] hover:text-white transition-colors w-full"
                       >
-                        {isImporting ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin mr-2" strokeWidth={2} />
-                            {importProgress
-                              ? `Importing ${importProgress.current}/${importProgress.total}...`
-                              : 'Importing...'}
-                          </>
-                        ) : (
-                          <>
-                            <Upload className="w-4 h-4 mr-2" strokeWidth={2} />
-                            Import Markdown Folder
-                          </>
-                        )}
-                      </Button>
+                        <ChevronRight
+                          className={`w-4 h-4 transition-transform ${expandedIntegration === 'markdown' ? 'rotate-90' : ''}`}
+                          strokeWidth={2}
+                        />
+                        Markdown Folder
+                      </button>
 
-                      {isMacOS() && (
-                        <>
+                      {expandedIntegration === 'markdown' && (
+                        <div className="space-y-3 pl-6 border-l-2 border-[var(--color-border)]">
+                          <p className="text-xs text-[var(--color-text-secondary)]">
+                            Import a folder of <code className="text-[var(--color-text-primary)]">.md</code> files
+                            (Obsidian vault, Bear export, etc.). Folder structure becomes hierarchical tags.
+                          </p>
+
+                          <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={importTags}
+                              onChange={(e) => setImportTags(e.target.checked)}
+                              disabled={isImporting}
+                              className="rounded border-[var(--color-border)]"
+                            />
+                            Import tags from folders and frontmatter
+                          </label>
+
+                          <Button
+                            variant="secondary"
+                            onClick={handleObsidianImport}
+                            disabled={isImporting}
+                            className="w-full justify-center"
+                          >
+                            {isImporting ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin mr-2" strokeWidth={2} />
+                                {importProgress
+                                  ? `Importing ${importProgress.current}/${importProgress.total}...`
+                                  : 'Importing...'}
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="w-4 h-4 mr-2" strokeWidth={2} />
+                                Choose Folder...
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Apple Notes — desktop macOS only */}
+                  {isDesktopApp() && isMacOS() && (
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleIntegration('apple-notes')}
+                        className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)] hover:text-white transition-colors w-full"
+                      >
+                        <ChevronRight
+                          className={`w-4 h-4 transition-transform ${expandedIntegration === 'apple-notes' ? 'rotate-90' : ''}`}
+                          strokeWidth={2}
+                        />
+                        Apple Notes
+                      </button>
+
+                      {expandedIntegration === 'apple-notes' && (
+                        <div className="space-y-3 pl-6 border-l-2 border-[var(--color-border)]">
+                          <p className="text-xs text-[var(--color-text-secondary)]">
+                            Import notes directly from the Apple Notes app. Folders become hierarchical tags.
+                            Requires Full Disk Access for Atomic in System Settings → Privacy &amp; Security.
+                          </p>
+
+                          <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={importTags}
+                              onChange={(e) => setImportTags(e.target.checked)}
+                              disabled={isImporting}
+                              className="rounded border-[var(--color-border)]"
+                            />
+                            Import tags from Apple Notes folders
+                          </label>
+
                           <Button
                             variant="secondary"
                             onClick={handleAppleNotesImport}
@@ -2432,37 +2515,6 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                               </>
                             )}
                           </Button>
-                          <p className="text-xs text-[var(--color-text-secondary)]">
-                            Select <code className="text-[var(--color-text-primary)]">~/Library/Group Containers/group.com.apple.notes</code>.
-                            Requires Full Disk Access for Atomic in System Settings → Privacy &amp; Security.
-                          </p>
-                        </>
-                      )}
-
-                      {/* Import Result */}
-                      {importResult && (
-                        <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-md text-sm">
-                          <div className="text-green-400 font-medium mb-1">Import complete!</div>
-                          <div className="text-[var(--color-text-secondary)] space-y-0.5">
-                            <div>Imported: {importResult.imported} notes</div>
-                            {importResult.tags_created > 0 && (
-                              <div>Tags created: {importResult.tags_created}</div>
-                            )}
-                            {importResult.errors > 0 && (
-                              <div>Errors: {importResult.errors} (failed to create)</div>
-                            )}
-                            {importResult.skipped > 0 && (
-                              <div>Skipped: {importResult.skipped} (duplicates/empty)</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Import Error */}
-                      {importError && (
-                        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-md text-sm">
-                          <div className="text-red-400 font-medium mb-1">Import failed</div>
-                          <div className="text-[var(--color-text-secondary)]">{importError}</div>
                         </div>
                       )}
                     </div>
@@ -2473,7 +2525,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                     <div className="space-y-3">
                       <button
                         type="button"
-                        onClick={handleMcpExpand}
+                        onClick={() => toggleIntegration('mcp')}
                         className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)] hover:text-white transition-colors w-full"
                       >
                         <ChevronRight
