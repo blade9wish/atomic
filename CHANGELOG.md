@@ -2,6 +2,13 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.22.0 — 2026-04-14
+
+- Add Apple Notes importer — import notes directly from macOS Apple Notes with folder-based tags, duplicate detection, and protobuf-to-markdown conversion
+- Clicking the source URL on an imported Apple Note now opens the original note in the Apple Notes app using the native `applenotes:` URL scheme
+- Show a guided Full Disk Access prompt when Apple Notes import is blocked by macOS permissions, with a direct link to System Settings
+- Reorganize the Integrations settings tab into collapsible sections (Markdown Folder, Apple Notes, MCP) for easier navigation
+
 ## v1.21.7 — 2026-04-13
 
 - Improve internal release infrastructure
