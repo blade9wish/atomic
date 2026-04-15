@@ -180,6 +180,7 @@ export class Setting {
   }
   setName(_: string) { return this; }
   setDesc(_: string) { return this; }
+  setHeading() { return this; }
   addText(cb: (t: any) => void) {
     const input = document.createElement("input");
     const t = {
