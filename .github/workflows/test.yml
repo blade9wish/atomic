@@ -96,14 +96,33 @@ jobs:
             ${{ runner.os }}-cargo-test-
             ${{ runner.os }}-cargo-
 
-      # Postgres-backed storage tests share one DB and must run serially.
-      # See crates/atomic-core/tests/storage_tests.rs for the rationale.
+      # Postgres-backed tests share one DB and must run serially — the
+      # storage and pipeline suites both truncate between tests. See
+      # crates/atomic-core/tests/storage_tests.rs for the rationale.
       - name: Run storage tests against Postgres
         run: |
           cargo test \
             -p atomic-core \
             --features postgres \
             --test storage_tests \
+            --locked \
+            -- --test-threads=1
+
+      - name: Run pipeline tests against Postgres
+        run: |
+          cargo test \
+            -p atomic-core \
+            --features postgres \
+            --test pipeline_tests \
+            --locked \
+            -- --test-threads=1
+
+      - name: Run multi-database isolation tests against Postgres
+        run: |
+          cargo test \
+            -p atomic-core \
+            --features postgres \
+            --test multi_db_tests \
             --locked \
             -- --test-threads=1
 
