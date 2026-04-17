@@ -2,6 +2,11 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.23.1 — 2026-04-17
+
+- Add collapsible and draggable popovers on the canvas — atom previews can now be collapsed to just the title bar, dragged freely around the viewport, and dismissed with a close button
+- Add database selector to the browser extension — clipped atoms can now be sent to any database on the server, not just the default
+
 ## v1.23.0 — 2026-04-17
 
 - Add a first-run welcome screen and guided capture options (URL, RSS feed, markdown folder, Apple Notes, MCP) shown on the dashboard when no atoms or briefings exist yet
