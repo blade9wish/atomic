@@ -94,16 +94,14 @@ pub struct TestOpenRouterBody {
 pub async fn test_openrouter_connection(
     body: web::Json<TestOpenRouterBody>,
 ) -> HttpResponse {
+    // Validate the key against the authenticated `/key` endpoint rather than a
+    // real chat completion. This avoids spending credits and exercising a
+    // specific model just to confirm the key is valid.
+    // https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key
     let client = reqwest::Client::new();
     let response = client
-        .post("https://openrouter.ai/api/v1/chat/completions")
+        .get("https://openrouter.ai/api/v1/key")
         .header("Authorization", format!("Bearer {}", body.api_key))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": "anthropic/claude-haiku-4.5",
-            "messages": [{"role": "user", "content": "Hi"}],
-            "max_tokens": 5
-        }))
         .send()
         .await;
 

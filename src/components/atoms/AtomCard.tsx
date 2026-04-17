@@ -126,6 +126,7 @@ export const AtomCard = memo(function AtomCard({
   const remainingTags = atom.tags.length - maxVisibleTags;
 
   if (viewMode === 'list') {
+    const hasMetaRow = atom.tags.length > 0 || !!displaySource;
     return (
       <div
         onClick={handleClick}
@@ -138,41 +139,49 @@ export const AtomCard = memo(function AtomCard({
           onRetryTagging={handleRetryTagging}
         />
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-baseline gap-2 min-w-0">
             <span
-              className={`text-sm font-medium shrink-0 ${
+              className={`text-sm font-medium truncate min-w-0 ${
                 matchingChunkContent ? 'text-[var(--color-accent-light)]' : 'text-[var(--color-text-primary)]'
               }`}
             >
               {title || 'Untitled'}
             </span>
             {snippet && (
-              <span className="text-xs text-[var(--color-text-tertiary)] truncate">
+              <span className="hidden sm:inline text-xs text-[var(--color-text-tertiary)] truncate">
                 {snippet}
               </span>
             )}
           </div>
-          {atom.tags.length > 0 && (
-            <div className="flex items-center gap-1.5 mt-1">
-              {visibleTags.map((tag) => (
-                <TagChip key={tag.id} name={tag.name} size="sm" />
-              ))}
-              {remainingTags > 0 && (
-                <span className="text-xs text-[var(--color-text-tertiary)]">+{remainingTags}</span>
+          {hasMetaRow && (
+            <div className="flex items-center gap-1.5 mt-1 min-w-0">
+              {atom.tags.length > 0 && (
+                <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                  {visibleTags.map((tag) => (
+                    <TagChip key={tag.id} name={tag.name} size="sm" />
+                  ))}
+                  {remainingTags > 0 && (
+                    <span className="text-xs text-[var(--color-text-tertiary)] shrink-0">+{remainingTags}</span>
+                  )}
+                </div>
+              )}
+              {displaySource && (
+                <span
+                  className="ml-auto shrink-0 text-xs text-[var(--color-text-tertiary)] bg-[var(--color-bg-panel)] px-1.5 py-0.5 rounded truncate max-w-[100px] sm:max-w-[140px]"
+                  title={atom.source_url ?? displaySource}
+                >
+                  {displaySource}
+                </span>
               )}
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {displaySource && (
-            <span className="text-xs text-[var(--color-text-tertiary)] bg-[var(--color-bg-panel)] px-1.5 py-0.5 rounded truncate max-w-[120px]" title={atom.source_url ?? displaySource}>
-              {displaySource}
-            </span>
-          )}
-          <span className="text-xs text-[var(--color-text-tertiary)] whitespace-nowrap">
-            {formatRelativeDate(getDisplayDate(atom))}
-          </span>
-        </div>
+        <span
+          className="shrink-0 text-xs text-[var(--color-text-tertiary)] whitespace-nowrap"
+          title={formatRelativeDate(getDisplayDate(atom))}
+        >
+          {formatShortRelativeDate(getDisplayDate(atom))}
+        </span>
       </div>
     );
   }

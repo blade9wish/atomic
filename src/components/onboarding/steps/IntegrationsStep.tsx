@@ -288,7 +288,16 @@ function ExtensionContent() {
   return (
     <>
       <ol className="space-y-1.5 text-sm text-[var(--color-text-secondary)] list-decimal list-inside">
-        <li>Install the Atomic browser extension</li>
+        <li>
+          <a
+            href="https://chromewebstore.google.com/detail/atomic-web-clipper/bknijbafnefbaklndpglcmlhaglikccf"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-[var(--color-accent)] hover:underline"
+          >
+            Install the Atomic Web Clipper for Chrome
+          </a>
+        </li>
         <li>Click the extension icon and open settings</li>
         <li>Enter the server URL and auth token below</li>
       </ol>

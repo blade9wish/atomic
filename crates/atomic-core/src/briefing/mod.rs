@@ -62,24 +62,21 @@ pub struct BriefingWithCitations {
 /// on busy days.
 const MAX_NEW_ATOMS: usize = 100;
 
-/// Hardcoded briefing content returned when no new atoms exist.
-fn empty_briefing_content(since: &DateTime<Utc>) -> String {
-    format!("Nothing new since {}.", since.to_rfc3339())
-}
-
 /// Generate a daily briefing for all atoms created after `since`.
 ///
 /// Flow:
 /// 1. Fetch up to [`MAX_NEW_ATOMS`] atoms with `created_at > since`,
 ///    ordered by `created_at DESC`.
-/// 2. If zero atoms: insert a placeholder briefing ("Nothing new since ...")
-///    and return it without invoking the LLM.
+/// 2. If zero atoms: return `Ok(None)` — nothing is persisted. The caller
+///    still bumps `last_run` so the scheduler waits the full interval before
+///    re-polling. This keeps the UI from showing a stub "Nothing new since
+///    ..." briefing when the knowledge base is quiet.
 /// 3. Otherwise: run the agentic loop over the new atoms, synthesize the
-///    briefing, extract `[N]` citations, and persist.
+///    briefing, extract `[N]` citations, persist, and return `Ok(Some(_))`.
 pub async fn run_briefing(
     core: &AtomicCore,
     since: DateTime<Utc>,
-) -> Result<BriefingWithCitations, AtomicCoreError> {
+) -> Result<Option<BriefingWithCitations>, AtomicCoreError> {
     let since_str = since.to_rfc3339();
     tracing::info!(since = %since_str, "[briefing] Starting daily briefing run");
 
@@ -98,23 +95,11 @@ pub async fn run_briefing(
         "[briefing] Fetched new atoms"
     );
 
-    // Zero-atom fast path: no LLM call.
+    // Zero-atom fast path: skip the LLM call and do not persist anything.
+    // The caller updates `last_run` so we don't rescan the same empty window.
     if new_atoms.is_empty() {
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = Utc::now().to_rfc3339();
-        let briefing = Briefing {
-            id: id.clone(),
-            content: empty_briefing_content(&since),
-            created_at: now.clone(),
-            atom_count: 0,
-            last_run_at: since_str.clone(),
-        };
-        let saved = core
-            .storage()
-            .insert_briefing_sync(&briefing, &[])
-            .await?;
-        tracing::info!(briefing_id = %saved.briefing.id, "[briefing] Saved empty briefing (no new atoms)");
-        return Ok(saved);
+        tracing::info!("[briefing] No new atoms — skipping briefing creation");
+        return Ok(None);
     }
 
     // Run the agent loop.
@@ -159,5 +144,5 @@ pub async fn run_briefing(
         citations = saved.citations.len(),
         "[briefing] Saved briefing"
     );
-    Ok(saved)
+    Ok(Some(saved))
 }

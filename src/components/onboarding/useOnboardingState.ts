@@ -329,7 +329,7 @@ export function useOnboardingState() {
 export const STEPS: { id: StepId; label: string; required: boolean }[] = [
   { id: 'welcome', label: 'Welcome', required: true },
   { id: 'ai-provider', label: 'AI Provider', required: true },
-  { id: 'tag-categories', label: 'Tag Categories', required: false },
-  { id: 'integrations', label: 'Integrations', required: false },
-  { id: 'tutorial', label: 'Tutorial', required: false },
+  { id: 'tag-categories', label: 'Tag Categories', required: true },
+  { id: 'integrations', label: 'Integrations', required: true },
+  { id: 'tutorial', label: 'Tutorial', required: true },
 ];

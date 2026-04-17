@@ -115,6 +115,10 @@ interface AtomsStore {
   error: string | null;
   nextCursor: string | null;
   nextCursorId: string | null;
+  // Flips to true after the first successful fetch or cache hydrate. Lets
+  // consumers distinguish "truly empty" from "haven't loaded yet" without
+  // flashing empty-state UI during cold start.
+  initialLoadComplete: boolean;
 
   // Search state
   searchMode: SearchMode;
@@ -192,6 +196,7 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
   error: null,
   nextCursor: null,
   nextCursorId: null,
+  initialLoadComplete: false,
 
   // Search state
   searchMode: 'hybrid' as SearchMode,
@@ -233,6 +238,7 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
         isLoadingInitial: false,
         nextCursor: result.next_cursor ?? null,
         nextCursorId: result.next_cursor_id ?? null,
+        initialLoadComplete: true,
       });
       if (isDefaultQuery) {
         const dbId = useDatabasesStore.getState().activeId;
@@ -272,6 +278,7 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
       hasMore: cached.data.atoms.length < cached.data.totalCount,
       nextCursor: cached.data.nextCursor,
       nextCursorId: cached.data.nextCursorId,
+      initialLoadComplete: true,
     });
   },
 
@@ -297,6 +304,7 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
         isLoadingInitial: false,
         nextCursor: result.next_cursor ?? null,
         nextCursorId: result.next_cursor_id ?? null,
+        initialLoadComplete: true,
       });
     } catch (error) {
       set({ error: String(error), isLoadingInitial: false });
@@ -623,6 +631,7 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
     error: null,
     nextCursor: null,
     nextCursorId: null,
+    initialLoadComplete: false,
     searchMode: 'hybrid',
     semanticSearchQuery: '',
     semanticSearchResults: null,

@@ -58,7 +58,11 @@ export const useBriefingStore = create<BriefingStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const transport = getTransport();
-      const history = await transport.invoke<Briefing[]>('list_briefings', { limit: HISTORY_LIMIT });
+      const raw = await transport.invoke<Briefing[]>('list_briefings', { limit: HISTORY_LIMIT });
+      // Filter out zero-atom stub briefings that older builds persisted when
+      // there was nothing new to report. The widget's fallback UI is a better
+      // experience than a briefing that just echoes "Nothing new since ...".
+      const history = raw.filter(b => b.atom_count > 0);
       if (history.length === 0) {
         set({ history: [], activeIndex: 0, active: null, isLoading: false });
         return;
@@ -93,11 +97,18 @@ export const useBriefingStore = create<BriefingStore>((set, get) => ({
     set({ isRunning: true, error: null });
     try {
       const transport = getTransport();
-      const active = await transport.invoke<BriefingWithCitations>('run_briefing_now');
-      // Refresh history so the new briefing is at index 0; keep the freshly-returned
-      // active object so we don't need a second round-trip.
-      const history = await transport.invoke<Briefing[]>('list_briefings', { limit: HISTORY_LIMIT });
-      set({ history, activeIndex: 0, active, isRunning: false });
+      // Server returns 204 (parsed as `undefined`) when there were no new atoms
+      // in the window — no briefing row is created in that case. Fall through
+      // to refreshing the history so the widget rests on its last real briefing
+      // (or the empty fallback if there is none).
+      const result = await transport.invoke<BriefingWithCitations | undefined>('run_briefing_now');
+      set({ isRunning: false });
+      if (result) {
+        const history = await transport.invoke<Briefing[]>('list_briefings', { limit: HISTORY_LIMIT });
+        set({ history: history.filter(b => b.atom_count > 0), activeIndex: 0, active: result });
+      } else {
+        await get().fetchLatest();
+      }
     } catch (error) {
       set({ error: String(error), isRunning: false });
     }
