@@ -2,6 +2,12 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.22.5 — 2026-04-16
+
+- Add canvas hover emphasis that dims non-neighboring nodes and edges with an animated fade, making a hovered node's connections visually pop
+- Improve server responsiveness by migrating core storage operations to async, preventing SQLite calls from blocking the request-handling runtime
+- Add CI test workflow and expand integration test coverage for multi-database and embedding pipeline scenarios
+
 ## v1.22.4 — 2026-04-16
 
 - Fix a startup crash when initializing the desktop app authentication token
