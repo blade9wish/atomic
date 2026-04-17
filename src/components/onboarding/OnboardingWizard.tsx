@@ -51,8 +51,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     }
   })();
 
-  const isOptional = !currentStepDef.required;
-
   // Save AI provider settings before moving to step 3+
   const saveProviderSettings = async () => {
     try {
@@ -127,14 +125,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     }
   };
 
-  const handleSkip = () => {
-    if (isLastStep) {
-      onComplete();
-    } else {
-      dispatch({ type: 'NEXT_STEP' });
-    }
-  };
-
   const handleBack = () => {
     dispatch({ type: 'PREV_STEP' });
   };
@@ -171,7 +161,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
             </h1>
             <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
               Step {state.currentStep + 1} of {STEPS.length}: {currentStepDef.label}
-              {isOptional && ' (optional)'}
             </p>
           </div>
           <StepIndicator currentStep={state.currentStep} onStepClick={handleStepClick} />
@@ -192,11 +181,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
             )}
           </div>
           <div className="flex gap-2">
-            {isOptional && (
-              <Button variant="secondary" onClick={handleSkip}>
-                Skip
-              </Button>
-            )}
             <Button onClick={handleNext} disabled={!canProceed}>
               {isLastStep ? 'Finish' : 'Next'}
             </Button>

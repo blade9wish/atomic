@@ -1500,11 +1500,15 @@ impl AtomicCore {
     /// persisted `task.daily_briefing.last_run` (or a 7-day lookback on the
     /// first run), invokes the agentic loop, and persists the result.
     ///
+    /// Returns `Ok(None)` when there are no new atoms in the window — no
+    /// briefing row is written in that case. `last_run` is still bumped so
+    /// the scheduler waits the full interval before re-polling.
+    ///
     /// Updates `task.daily_briefing.last_run` on success so the next
     /// scheduled tick correctly waits for the full interval. On failure the
     /// error bubbles up and `last_run` is left unchanged — the scheduler
     /// will retry on the next tick.
-    pub async fn run_daily_briefing(&self) -> Result<briefing::BriefingWithCitations, AtomicCoreError> {
+    pub async fn run_daily_briefing(&self) -> Result<Option<briefing::BriefingWithCitations>, AtomicCoreError> {
         let _guard = self.briefing_lock.try_lock().map_err(|_| {
             AtomicCoreError::Conflict("A daily briefing is already running".to_string())
         })?;

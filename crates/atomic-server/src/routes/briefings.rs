@@ -70,6 +70,7 @@ pub async fn get_briefing(db: Db, path: web::Path<String>) -> HttpResponse {
     path = "/api/briefings/run",
     responses(
         (status = 200, description = "Briefing generated", body = atomic_core::BriefingWithCitations),
+        (status = 204, description = "No new atoms in the window — no briefing was generated"),
         (status = 400, description = "Error", body = ApiErrorResponse)
     ),
     tag = "briefings"
@@ -95,13 +96,14 @@ pub async fn run_briefing_now(
         .unwrap_or_else(|| "default".to_string());
 
     match core.run_daily_briefing().await {
-        Ok(result) => {
+        Ok(Some(result)) => {
             let _ = state.event_tx.send(ServerEvent::BriefingReady {
                 db_id,
                 briefing_id: result.briefing.id.clone(),
             });
             HttpResponse::Ok().json(result)
         }
+        Ok(None) => HttpResponse::NoContent().finish(),
         Err(e) => error_response(e),
     }
 }

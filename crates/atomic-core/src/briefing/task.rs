@@ -60,10 +60,13 @@ impl ScheduledTask for DailyBriefingTask {
         // first-run lookback) and persists a fresh `last_run` on success.
         match core.run_daily_briefing().await {
             Ok(result) => {
+                // `result` is None when the window had no new atoms; we still
+                // emit Completed so the scheduler records a clean run, but
+                // there's no briefing id to surface.
                 (ctx.event_cb)(TaskEvent::Completed {
                     task_id: TASK_ID.to_string(),
                     db_id,
-                    result_id: Some(result.briefing.id.clone()),
+                    result_id: result.as_ref().map(|r| r.briefing.id.clone()),
                 });
                 Ok(())
             }
