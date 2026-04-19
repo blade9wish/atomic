@@ -196,11 +196,8 @@ Users saw it as "selection is adding padding between blocks" —
 measured via `scripts/harness/check-selection-gaps.mjs`, up to 220px
 of drift.
 
-Diagnostic harnesses referenced in the fix:
-- `check-selection-gaps.mjs` — verifies line positions are stable
-  during range selection.
-- `inspect-blank-during-selection.mjs` — dumps a blank cm-line's DOM
-  state during a drag-select.
+Guard: `check-selection-gaps.mjs` verifies line positions stay stable
+during a range selection.
 
 ---
 
@@ -355,9 +352,7 @@ Specialised diagnostics:
 | `diagnose-premount-drift.mjs` | Per-landmark view↔edit position diff; run after changing CSS margins. |
 | `measure-margins.mjs` | Dumps image surround gaps (prev/next) in view vs edit. |
 | `measure-paragraphs.mjs` | Dumps paragraph heights + margins in both modes. |
-| `measure-collapse.mjs` | Verifies margin-collapsing works in CM (was a theory we had to rule out). |
 | `measure-edit-mount.mjs` | Click-to-edit mount time across atom sizes. |
-| `inspect-blank-during-selection.mjs` | Dumps blank cm-line DOM state during a drag-select. |
 | `debug-image-pos.mjs` | Shows `posAtCoords` vs `elementFromPoint` drift — the heightmap staleness smoking gun. |
 
 These are kept in the repo even though they're mostly for

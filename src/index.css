@@ -389,13 +389,12 @@ mark.search-highlight[data-current="true"] {
   50% { opacity: 0.6; }
 }
 
-/* Rich-markdown live preview inside CodeMirror.
- * Heading lines are sized/weighted to match Tailwind's prose defaults so the
- * document doesn't reflow when toggling between view and edit modes. */
-/* Edit-mode live preview. Relies on the `VP.Margin` patch in
- * patches/@codemirror+view+*.patch — with virtualisation effectively
+/* Rich-markdown live preview inside CodeMirror. Heading, paragraph and
+ * list rules are sized/weighted to match Tailwind's prose defaults so
+ * view↔edit toggling doesn't reflow. Relies on the `VP.Margin` patch
+ * in patches/@codemirror+view+*.patch — with virtualisation effectively
  * disabled, per-line height variance from these decorations no longer
- * destabilises the heightmap. */
+ * destabilises CM's heightmap. See src/lib/EDITOR.md. */
 
 .cm-md-hidden {
   display: none;
@@ -440,13 +439,9 @@ mark.search-highlight[data-current="true"] {
 .cm-line.cm-md-list-start-nested { margin-top: 0.75em; }
 .cm-line.cm-md-list-end-nested { margin-bottom: 0.75em; }
 
-/* Image widgets: inline replace widgets to preserve click-to-doc mapping
- * (block widgets drift CM's heightmap even with virtualisation patched).
- *
- * No `min-height` — it stretches small or wide-aspect images. With the
- * `VP.Margin` patch the whole doc is measured on mount and eager image
- * loading + the image-size cache keep the heightmap accurate without
- * needing a loading-state placeholder height. */
+/* Image widgets. No `min-height` — it stretches small or wide-aspect
+ * images. The `VP.Margin` patch + eager image loading + the image-size
+ * cache keep heights accurate without needing a placeholder reservation. */
 .cm-md-img {
   display: inline-block;
   max-width: 100%;

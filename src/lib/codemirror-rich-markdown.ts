@@ -404,36 +404,25 @@ const imageField = StateField.define<DecorationSet>({
 // which flips `imageField`'s rendering from inline-replace to raw-
 // markdown-above-block-widget so the user can edit the URL / alt text.
 //
-// Why this is so fiddly:
-//   - Dispatching in mousedown and letting CM's built-in mousedown also
-//     run: CM re-queries posAtCoords against the *rebuilt* layout and
-//     dispatches a different selection (on some line above the image).
+// Two things that don't work, as background for why this is structured
+// the way it is:
+//   - `mousedown` + `dispatch` + `return false`: CM's own mousedown runs
+//     after and re-queries `posAtCoords` against the *rebuilt* layout,
+//     dispatching a different selection (some line above the image).
 //     That second dispatch wins.
-//   - Dispatching on `click`: the IMG is detached during the rebuild so
+//   - `click`/`mouseup`: the IMG is detached during the rebuild so
 //     mouseup fires outside cm-content and the browser never dispatches
-//     a matching click event.
+//     a matching click.
 //
-// Current approach: synchronous dispatch from mousedown, then
-// preventDefault + return true so CM's handler loop breaks *before*
-// basicMouseSelection runs (the `if (event.defaultPrevented) break;`
-// inside `runHandlers`). A known tradeoff: the decoration swap makes
-// CM's heightmap disagree with the DOM until the next measure cycle, so
-// the next click on a DIFFERENT line can resolve to a stale pos via
-// posAtCoords. We kick a re-measure on the next rAF to narrow the
-// window; in practice users rarely chain two clicks fast enough to hit
-// the race.
-// Image click handler. Places the caret on the image's source line so
-// `imageField` flips it from inline-replace to raw-markdown-above-block-
-// widget.
+// So: synchronous dispatch from mousedown + preventDefault + return true
+// so CM's handler loop breaks *before* basicMouseSelection runs (the
+// `if (event.defaultPrevented) break;` inside `runHandlers`).
 //
-// After the decoration swap, CM's heightmap briefly disagrees with the
-// DOM — `posAtCoords` for clicks on other lines returns stale positions
-// pointing at the image line. CM's internal re-measure doesn't fire
-// synchronously. To protect the VERY NEXT click (typically where the
-// user was headed next), we arm a one-shot mousedown listener that
-// resolves the target doc position by walking the DOM (elementFromPoint
-// → cm-line → posAtDOM) rather than trusting posAtCoords. The listener
-// disarms itself after one click or after ~500ms of inactivity.
+// That alone leaves a known tradeoff: the decoration swap makes CM's
+// heightmap disagree with the DOM until the next measure cycle, so the
+// *next* click on another line can resolve to a stale pos via
+// `posAtCoords`. `armNextClickDomResolver` protects that very next
+// click by resolving its position from live DOM instead — see below.
 const imageClickHandler = EditorView.domEventHandlers({
   mousedown(event, view) {
     const target = event.target as HTMLElement | null;
@@ -446,6 +435,13 @@ const imageClickHandler = EditorView.domEventHandlers({
   },
 });
 
+// One-shot capture-phase mousedown listener armed right after an image
+// click. For the VERY NEXT click only, it resolves the target caret
+// position from live DOM (`elementFromPoint` + `caretRangeFromPoint` +
+// `posFromDOM`) instead of CM's `posAtCoords`, which consults the
+// heightmap — still stale for a frame or two after the image's
+// decoration swap, so its answer lands on the wrong line. Once it
+// handles a click (or bails on a modifier-key/image click), it disarms.
 function armNextClickDomResolver(view: EditorView) {
   const content = view.contentDOM;
   const cleanup = () => {
@@ -463,15 +459,10 @@ function armNextClickDomResolver(view: EditorView) {
     while (line && !line.classList?.contains('cm-line')) line = line.parentElement;
     cleanup();
     if (!line) return;
-    // Resolve the exact click position via the DOM (not CM's heightmap-
-    // based posAtCoords, which is stale after the image-widget swap).
-    // `caretRangeFromPoint` returns the text node + offset under the
-    // pointer; feed that into CM's `posFromDOM` for a doc position that
-    // respects WHERE on the line the user clicked, not just the line's
-    // start.
     const pos = resolvePosFromPoint(view, line, e.clientX, e.clientY);
     view.dispatch({ selection: { anchor: pos } });
     view.focus();
+    // Stop CM's own mousedown from dispatching via the stale heightmap.
     e.preventDefault();
     e.stopImmediatePropagation();
   };
@@ -485,7 +476,7 @@ function resolvePosFromPoint(
   y: number,
 ): number {
   const doc = document as any;
-  const getRange: (x: number, y: number) => Range | null =
+  const getRange: (x: number, y: number) => globalThis.Range | null =
     doc.caretRangeFromPoint?.bind(doc) ??
     ((ax: number, ay: number) => {
       const p = doc.caretPositionFromPoint?.(ax, ay);

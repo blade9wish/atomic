@@ -37,3 +37,4 @@ plugins/obsidian-plugin/data.json
 
 # Claude Code
 .claude/.worktrees/
+.worktrees/
