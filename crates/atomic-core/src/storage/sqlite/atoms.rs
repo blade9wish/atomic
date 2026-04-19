@@ -268,15 +268,26 @@ impl SqliteStorage {
             if let Err(e) = (|| -> Result<(), AtomicCoreError> {
                 if reset_embedding_status {
                     conn.execute(
-                        "UPDATE atoms SET content = ?1, source_url = ?2, source = ?3, published_at = ?4, updated_at = ?5, embedding_status = ?6,
-                         title = ?7, snippet = ?8
-                         WHERE id = ?9",
+                        "UPDATE atoms
+                         SET content = ?1,
+                             source_url = ?2,
+                             source = ?3,
+                             published_at = ?4,
+                             updated_at = ?5,
+                             embedding_status = ?6,
+                             tagging_status = ?7,
+                             embedding_error = NULL,
+                             tagging_error = NULL,
+                             title = ?8,
+                             snippet = ?9
+                         WHERE id = ?10",
                         (
                             &request.content,
                             &request.source_url,
                             &source,
                             &request.published_at,
                             updated_at,
+                            "pending",
                             "pending",
                             &title,
                             &snippet,

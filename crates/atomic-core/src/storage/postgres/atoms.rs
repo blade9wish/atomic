@@ -363,9 +363,19 @@ impl AtomStore for PostgresStorage {
             .map_err(|e| AtomicCoreError::DatabaseOperation(e.to_string()))?;
 
         sqlx::query(
-            "UPDATE atoms SET content = $1, source_url = $2, source = $3, published_at = $4,
-             updated_at = $5, embedding_status = $6, title = $7, snippet = $8
-             WHERE id = $9 AND db_id = $10"
+            "UPDATE atoms
+             SET content = $1,
+                 source_url = $2,
+                 source = $3,
+                 published_at = $4,
+                 updated_at = $5,
+                 embedding_status = $6,
+                 tagging_status = $7,
+                 embedding_error = NULL,
+                 tagging_error = NULL,
+                 title = $8,
+                 snippet = $9
+             WHERE id = $10 AND db_id = $11"
         )
         .bind(&request.content)
         .bind(&request.source_url)
@@ -373,6 +383,7 @@ impl AtomStore for PostgresStorage {
         .bind(&request.published_at)
         .bind(updated_at)
         .bind(embedding_status)
+        .bind("pending")
         .bind(&title)
         .bind(&snippet)
         .bind(id)
