@@ -4,6 +4,7 @@
   "version": "1.23.3",
   "type": "module",
   "scripts": {
+    "postinstall": "patch-package --error-on-fail",
     "dev": "vite",
     "dev:web": "VITE_BUILD_TARGET=web vite",
     "build": "tsc && vite build",
@@ -49,7 +50,12 @@
     "db:drop:force": "node scripts/drop-database.js --force --backup",
     "db:reset:pg": "docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d --wait && echo 'Postgres reset complete'",
     "db:drop:pg": "docker compose -f docker-compose.dev.yml down -v && echo 'Postgres volume deleted'",
-    "stress:wikipedia": "node scripts/stress-test-wikipedia.js"
+    "stress:wikipedia": "node scripts/stress-test-wikipedia.js",
+    "check:layout": "node scripts/check-layout.mjs",
+    "editor-harness": "node scripts/harness/run.mjs"
+  },
+  "overrides": {
+    "@codemirror/view": "6.38.8"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",
@@ -100,6 +106,8 @@
     "glob": "^10.3.0",
     "happy-dom": "^20.9.0",
     "jsdom": "^25.0.0",
+    "patch-package": "^8.0.1",
+    "playwright": "^1.59.1",
     "rss-parser": "^3.13.0",
     "tailwindcss": "^4.0.0",
     "turndown": "^7.2.0",

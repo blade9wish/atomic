@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, ReactNode, useRef, useMemo, memo } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, ReactNode, useRef, useMemo, memo } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
+import { EditorView } from '@codemirror/view';
 import { undo, redo } from '@codemirror/commands';
 import { openExternalUrl } from '../../lib/platform';
 import { Modal } from '../ui/Modal';
@@ -177,16 +178,214 @@ function AtomReaderContent({
     setReaderEditState(isEditing, saveStatus);
   }, [isEditing, saveStatus, setReaderEditState]);
 
-  // Populate bridge ref so MainView can dispatch undo/redo/start/stop
+  // Preserve content position (not raw scrollTop) across the view↔edit
+  // flip. View and edit have different total heights so pixel preservation
+  // mis-aligns; instead, capture the topmost visible block (image by src or
+  // text block by prefix) and its y-offset, then after the toggle scroll so
+  // the same block ends up at the same y-offset in the new mode.
+  interface TogglePosition {
+    scrollTop: number;
+    targetText: string | null;
+    targetImageSrc: string | null;
+    targetOffsetY: number;
+  }
+  const pendingPositionRef = useRef<TogglePosition | null>(null);
+
+  const normalizeForMatch = useCallback((s: string): string => {
+    return s
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/[\\*_`#~]/g, '')
+      // Strip leading list marker: "- ", "* ", "+ ", "1. " — edit mode shows
+      // these as raw text, view mode renders them as <li> bullets so they
+      // never appear in the text content. Without stripping, the signature
+      // "- 878 — Jean-Baptiste Mardelle" wouldn't match view's "878 —
+      // Jean-Baptiste Mardelle" and content-position preserve falls back to
+      // raw scrollTop preservation (which drifts ~400px in list-heavy areas).
+      .replace(/^(?:[-*+]|\d+\.)\s+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }, []);
+
+  const contentRoot = useCallback((): Element | null => {
+    if (isEditing) return editorRef.current?.view?.contentDOM ?? null;
+    return articleRef.current;
+  }, [isEditing]);
+
+  const capturePosition = useCallback((): TogglePosition => {
+    const container = scrollContainerRef.current;
+    const root = contentRoot();
+    const scrollTop = container?.scrollTop ?? 0;
+    const empty = { scrollTop, targetText: null, targetImageSrc: null, targetOffsetY: 0 };
+    if (!container || !root) return empty;
+    const containerRect = container.getBoundingClientRect();
+    for (const child of Array.from(root.children)) {
+      const rect = child.getBoundingClientRect();
+      if (rect.bottom <= containerRect.top + 4) continue;
+      if (rect.top >= containerRect.bottom) break;
+      // Image blocks — use the <img>'s own rect (view wraps it in a span
+      // with a 2em top-margin; the visible image starts below that). In
+      // edit mode CM inserts `<img class="cm-widgetBuffer">` elements
+      // around widgets, so we must select the real image explicitly.
+      const img =
+        child.tagName === 'IMG' && (child as HTMLElement).className === 'cm-md-img'
+          ? (child as HTMLImageElement)
+          : (child.querySelector?.('img.cm-md-img, .markdown-image-wrapper img') as HTMLImageElement | null);
+      if (img?.src) {
+        const imgRect = img.getBoundingClientRect();
+        return {
+          scrollTop,
+          targetText: null,
+          targetImageSrc: img.src,
+          targetOffsetY: imgRect.top - containerRect.top,
+        };
+      }
+      const normalized = normalizeForMatch(child.textContent ?? '');
+      if (normalized.length < 8) continue;
+      return {
+        scrollTop,
+        targetText: normalized.slice(0, 60),
+        targetImageSrc: null,
+        targetOffsetY: rect.top - containerRect.top,
+      };
+    }
+    return empty;
+  }, [contentRoot, normalizeForMatch]);
+
+  const scrollElementToOffset = useCallback((el: Element, offsetY: number) => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const rect = (el as HTMLElement).getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    container.scrollTop += rect.top - containerRect.top - offsetY;
+  }, []);
+
+  const findTargetElement = useCallback(
+    (pending: TogglePosition, nudgeCm = false): HTMLElement | null => {
+      if (isEditing) {
+        const view = editorRef.current?.view;
+        if (!view) return null;
+        if (pending.targetImageSrc) {
+          const hit = Array.from(view.contentDOM.querySelectorAll('img.cm-md-img')).find(
+            (i) => (i as HTMLImageElement).src === pending.targetImageSrc
+          ) as HTMLElement | undefined;
+          if (hit) return hit;
+          if (nudgeCm) {
+            const source = view.state.doc.toString();
+            const escaped = pending.targetImageSrc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const match = new RegExp(`!\\[[^\\]]*\\]\\(${escaped}\\)?`).exec(source);
+            if (match) {
+              view.dispatch({ effects: EditorView.scrollIntoView(match.index, { y: 'nearest' }) });
+            }
+          }
+          return null;
+        }
+        if (pending.targetText) {
+          for (const child of Array.from(view.contentDOM.children)) {
+            const normalized = normalizeForMatch(child.textContent ?? '');
+            if (
+              normalized.length >= 8 &&
+              normalized.startsWith(pending.targetText.slice(0, Math.min(40, normalized.length)))
+            ) {
+              return child as HTMLElement;
+            }
+          }
+          if (nudgeCm) {
+            const source = view.state.doc.toString();
+            const words = pending.targetText.split(' ').filter((w) => w.length > 0);
+            for (let start = 0; start + 4 <= words.length; start++) {
+              const phrase = words.slice(start, start + 4).join(' ');
+              if (phrase.length < 15) continue;
+              const idx = source.indexOf(phrase);
+              if (idx >= 0) {
+                view.dispatch({ effects: EditorView.scrollIntoView(idx, { y: 'nearest' }) });
+                break;
+              }
+            }
+          }
+          return null;
+        }
+        return null;
+      }
+      const root = articleRef.current;
+      if (!root) return null;
+      if (pending.targetImageSrc) {
+        const hit = Array.from(root.querySelectorAll('img')).find(
+          (i) => (i as HTMLImageElement).src === pending.targetImageSrc
+        ) as HTMLImageElement | undefined;
+        return (hit ?? null) as HTMLElement | null;
+      }
+      if (pending.targetText) {
+        // Walk all block-level candidates including list items, not just
+        // direct article children — otherwise targeting "Jean-Baptiste
+        // Mardelle" would find `<ul>` (whose textContent begins with "878 —"
+        // from the first item) and scroll that instead.
+        const candidates = Array.from(
+          root.querySelectorAll(
+            'h1, h2, h3, h4, h5, h6, p, li, blockquote, pre, figure'
+          )
+        );
+        const prefix = pending.targetText.slice(0, 40);
+        let bestMatch: HTMLElement | null = null;
+        let bestScore = 0;
+        for (const el of candidates) {
+          const text = normalizeForMatch(el.textContent ?? '');
+          if (text.length < 8) continue;
+          if (!text.startsWith(prefix.slice(0, Math.min(40, text.length)))) continue;
+          const score = prefix.length / Math.max(1, text.length);
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = el as HTMLElement;
+          }
+        }
+        if (bestMatch) return bestMatch;
+      }
+      return null;
+    },
+    [isEditing, normalizeForMatch]
+  );
+
+  const restoreByPosition = useCallback(
+    (pending: TogglePosition, nudgeCm: boolean): boolean => {
+      if (!scrollContainerRef.current) return false;
+      const target = findTargetElement(pending, nudgeCm);
+      if (!target) return false;
+      scrollElementToOffset(target, pending.targetOffsetY);
+      return true;
+    },
+    [findTargetElement, scrollElementToOffset]
+  );
+
   useEffect(() => {
     readerEditorActions.current = {
-      startEditing,
-      stopEditing,
+      startEditing: (offset?: number) => {
+        pendingPositionRef.current = capturePosition();
+        startEditing(offset);
+      },
+      stopEditing: () => {
+        pendingPositionRef.current = capturePosition();
+        stopEditing();
+      },
       undo: () => { const v = editorRef.current?.view; if (v) undo(v); },
       redo: () => { const v = editorRef.current?.view; if (v) redo(v); },
     };
     return () => { readerEditorActions.current = null; };
-  }, [startEditing, stopEditing]);
+  }, [startEditing, stopEditing, capturePosition]);
+
+  useLayoutEffect(() => {
+    const pending = pendingPositionRef.current;
+    if (!pending) return;
+    pendingPositionRef.current = null;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    let frame = 0;
+    const tryRestore = () => {
+      const restored = restoreByPosition(pending, frame === 0);
+      if (!restored && frame === 0) el.scrollTop = pending.scrollTop;
+      if (frame++ < 5) requestAnimationFrame(tryRestore);
+    };
+    requestAnimationFrame(tryRestore);
+  }, [isEditing, restoreByPosition]);
 
   // Start in editing mode if requested
   useEffect(() => {
@@ -359,89 +558,6 @@ function AtomReaderContent({
     img: ({ src, alt }: { src?: string; alt?: string }) => <MarkdownImage src={src} alt={alt} />,
   }), [wrapWithHighlight]);
 
-  // Click-to-edit: use caretRangeFromPoint to find the nearest text position,
-  // then search for surrounding text in the raw markdown to estimate offset.
-  const handleContentClick = useCallback((e: React.MouseEvent<HTMLElement>) => {
-    if (isEditing) return;
-    const target = e.target as HTMLElement;
-    if (target.closest('a') || target.closest('button')) return;
-
-    let offset = 0;
-    const content = atom.content;
-    if (content && document.caretRangeFromPoint) {
-      const range = document.caretRangeFromPoint(e.clientX, e.clientY);
-      if (range) {
-        let textNode: Text | null = null;
-        let charOffset = range.startOffset;
-
-        if (range.startContainer.nodeType === Node.TEXT_NODE) {
-          textNode = range.startContainer as Text;
-        } else {
-          // Element node — find the nearest text node from the child index
-          const container = range.startContainer as Element;
-          const childIndex = range.startOffset;
-          // Try the child at the offset, then the one before it
-          for (let i = childIndex; i >= Math.max(0, childIndex - 1); i--) {
-            const child = container.childNodes[i];
-            if (!child) continue;
-            // Walk into the child to find its last/first text node
-            const walker = document.createTreeWalker(child, NodeFilter.SHOW_TEXT);
-            let last: Text | null = null;
-            let node: Text | null;
-            while ((node = walker.nextNode() as Text | null)) last = node;
-            if (last) {
-              textNode = last;
-              charOffset = last.textContent?.length ?? 0; // end of text
-              break;
-            }
-          }
-        }
-
-        if (textNode) {
-          const text = textNode.textContent || '';
-          const start = Math.max(0, charOffset - 10);
-          const end = Math.min(text.length, charOffset + 10);
-          const snippet = text.slice(start, end).trim();
-          if (snippet) {
-            // Find all occurrences of the snippet in the raw markdown
-            const indices: number[] = [];
-            let searchFrom = 0;
-            while (searchFrom < content.length) {
-              const idx = content.indexOf(snippet, searchFrom);
-              if (idx === -1) break;
-              indices.push(idx);
-              searchFrom = idx + 1;
-            }
-            if (indices.length === 1) {
-              offset = indices[0] + (charOffset - start);
-            } else if (indices.length > 1) {
-              // Pick the occurrence closest to the click's vertical position
-              const article = articleRef.current;
-              if (article) {
-                const rect = article.getBoundingClientRect();
-                const relativeY = (e.clientY - rect.top) / rect.height;
-                const targetPos = relativeY * content.length;
-                let bestIdx = indices[0];
-                let bestDist = Math.abs(indices[0] - targetPos);
-                for (const idx of indices) {
-                  const dist = Math.abs(idx - targetPos);
-                  if (dist < bestDist) {
-                    bestDist = dist;
-                    bestIdx = idx;
-                  }
-                }
-                offset = bestIdx + (charOffset - start);
-              } else {
-                offset = indices[0] + (charOffset - start);
-              }
-            }
-          }
-        }
-      }
-    }
-    startEditing(offset);
-  }, [isEditing, atom.content, startEditing]);
-
   // Focus CodeMirror and set cursor position after mount
   // Poll briefly because the view may not be ready on the first frame
   useEffect(() => {
@@ -460,6 +576,17 @@ function AtomReaderContent({
     };
     requestAnimationFrame(tryFocus);
   }, [isEditing, cursorOffset]);
+
+  // Dev: expose the editor view for e2e harness scripts.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const update = () => {
+      (window as any).__cmView = editorRef.current?.view ?? null;
+    };
+    update();
+    const id = setInterval(update, 200);
+    return () => clearInterval(id);
+  }, [isEditing]);
 
   const stopEditingRef = useRef(stopEditing);
   stopEditingRef.current = stopEditing;
@@ -548,8 +675,7 @@ function AtomReaderContent({
             ) : (
               <article
                 ref={articleRef}
-                className={`max-w-3xl cursor-text ${proseClasses}`}
-                onClick={handleContentClick}
+                className={`max-w-3xl ${proseClasses}`}
               >
                 {chunks.slice(0, renderedChunkCount).map((chunk, index) => (
                   <MemoizedMarkdownChunk key={index} content={chunk} components={markdownComponents} />

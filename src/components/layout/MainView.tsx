@@ -370,7 +370,7 @@ export function MainView() {
                 <button
                   onClick={() => readerState.editing
                     ? readerEditorActions.current?.stopEditing()
-                    : readerEditorActions.current?.startEditing(0)
+                    : readerEditorActions.current?.startEditing()
                   }
                   className={`p-1.5 rounded-md transition-colors ${
                     readerState.editing
@@ -404,7 +404,7 @@ export function MainView() {
                 <button
                   onClick={() => readerState.editing
                     ? readerEditorActions.current?.stopEditing()
-                    : readerEditorActions.current?.startEditing(0)
+                    : readerEditorActions.current?.startEditing()
                   }
                   className={`p-1.5 rounded-md transition-colors ${
                     readerState.editing
