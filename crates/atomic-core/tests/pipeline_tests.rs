@@ -225,6 +225,62 @@ async fn run_update_lifecycle(backend: Backend) {
     );
 }
 
+#[tokio::test]
+async fn draft_save_then_finalize_sqlite() {
+    run_draft_save_then_finalize(Backend::Sqlite).await;
+}
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn draft_save_then_finalize_postgres() {
+    if std::env::var("ATOMIC_TEST_DATABASE_URL").is_err() {
+        eprintln!("draft_save_then_finalize_postgres: skipping (ATOMIC_TEST_DATABASE_URL not set)");
+        return;
+    }
+    run_draft_save_then_finalize(Backend::Postgres).await;
+}
+
+async fn run_draft_save_then_finalize(backend: Backend) {
+    let mock = MockAiServer::start().await;
+    let handle = setup_core(backend, &mock.base_url())
+        .await
+        .expect("test harness setup");
+    let core = &handle.core;
+
+    let atom_id = create_and_await(core, "quantum mechanics particles waves atomic scales").await;
+
+    core.update_atom_content_only(
+        &atom_id,
+        UpdateAtomRequest {
+            content: "biology cells organisms dna evolution".to_string(),
+            source_url: None,
+            published_at: None,
+            tag_ids: None,
+        },
+    )
+    .await
+    .expect("draft save should succeed");
+
+    let after_draft = core.get_atom(&atom_id).await.unwrap().expect("atom exists");
+    assert_eq!(after_draft.atom.embedding_status, "pending");
+    assert_eq!(after_draft.atom.tagging_status, "pending");
+
+    let (cb, mut rx) = event_collector();
+    core.process_atom_pipeline(&atom_id, cb)
+        .await
+        .expect("finalize pipeline");
+    await_pipeline(&mut rx, &atom_id).await;
+
+    let finalized = core.get_atom(&atom_id).await.unwrap().expect("atom exists");
+    assert_eq!(finalized.atom.embedding_status, "complete");
+    assert_eq!(finalized.atom.tagging_status, "complete");
+    assert!(
+        finalized.tags.iter().any(|t| t.name == "Biology"),
+        "finalized draft should have fresh biology tag: {:?}",
+        finalized.tags
+    );
+}
+
 // ==================== Delete cascade ====================
 
 #[tokio::test]

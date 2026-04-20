@@ -140,6 +140,7 @@ interface AtomsStore {
   createAtom: (content: string, sourceUrl?: string, tagIds?: string[]) => Promise<AtomWithTags>;
   updateAtom: (id: string, content: string, sourceUrl?: string, tagIds?: string[]) => Promise<AtomWithTags>;
   updateAtomContentOnly: (id: string, content: string, sourceUrl?: string, tagIds?: string[]) => Promise<AtomWithTags>;
+  processAtomPipeline: (atomId: string) => Promise<void>;
   deleteAtom: (id: string) => Promise<void>;
   clearError: () => void;
 
@@ -149,6 +150,7 @@ interface AtomsStore {
   // New methods
   updateAtomStatus: (atomId: string, status: string) => void;
   batchUpdateAtomStatuses: (updates: Array<{atomId: string, status: string}>) => void;
+  updateTaggingStatus: (atomId: string, status: string) => void;
   addAtom: (atom: AtomWithTags) => void;
   search: (query: string) => Promise<void>;
   clearSemanticSearch: () => void;
@@ -411,6 +413,22 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
     }
   },
 
+  processAtomPipeline: async (atomId: string) => {
+    try {
+      await getTransport().invoke('process_atom_pipeline', { id: atomId });
+      set((state) => ({
+        atoms: state.atoms.map((a) =>
+          a.id === atomId
+            ? { ...a, embedding_status: 'pending' as const, tagging_status: 'pending' as const }
+            : a
+        ),
+      }));
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
+  },
+
   deleteAtom: async (id: string) => {
     set({ error: null });
     try {
@@ -448,6 +466,16 @@ export const useAtomsStore = create<AtomsStore>((set, get) => ({
           ? { ...a, embedding_status: newStatus as AtomSummary['embedding_status'] }
           : a;
       }),
+    }));
+  },
+
+  updateTaggingStatus: (atomId: string, status: string) => {
+    set((state) => ({
+      atoms: state.atoms.map((a) =>
+        a.id === atomId
+          ? { ...a, tagging_status: status as AtomSummary['tagging_status'] }
+          : a
+      ),
     }));
   },
 

@@ -362,9 +362,9 @@ function AtomReaderContent({
         pendingPositionRef.current = capturePosition();
         startEditing(offset);
       },
-      stopEditing: () => {
+      stopEditing: async () => {
         pendingPositionRef.current = capturePosition();
-        stopEditing();
+        await stopEditing();
       },
       undo: () => { const v = editorRef.current?.view; if (v) undo(v); },
       redo: () => { const v = editorRef.current?.view; if (v) redo(v); },
@@ -485,8 +485,11 @@ function AtomReaderContent({
       }
       if (e.key === 'Escape') {
         if (showDeleteModal || isSearchOpen) return;
-        // When editing, Escape is handled by the CodeMirror keymap directly
-        if (isEditing) return;
+        if (isEditing) {
+          e.preventDefault();
+          void stopEditing();
+          return;
+        }
         onDismiss();
       }
     };
@@ -601,7 +604,7 @@ function AtomReaderContent({
         e.stopImmediatePropagation();
         e.stopPropagation();
         e.preventDefault();
-        stopEditingRef.current();
+        void stopEditingRef.current();
       }
     };
     document.addEventListener('keydown', handler, true);
