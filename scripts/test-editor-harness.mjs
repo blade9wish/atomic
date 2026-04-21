@@ -253,6 +253,226 @@ async function probeClickFreeze(page) {
   );
 }
 
+async function probeFenceVisibility(page) {
+  // When any line inside a fenced code block is active, the ``` fences
+  // (and language info) should stay visible so the user keeps context
+  // while editing code. Without the FencedCode expansion the fence
+  // lines would be considered inactive and their CodeMark/CodeInfo
+  // tokens would be hidden.
+
+  const codeLines = page.locator('.cm-line.cm-atomic-fenced-code');
+  const count = await codeLines.count();
+  if (count < 3) {
+    record('fence stays visible while editing code', 'fail', `only ${count} fenced-code lines`);
+    return;
+  }
+
+  // Opening fence is the first such line. Interior code is somewhere
+  // between the open and close — pick the second line which is
+  // immediately after the opening fence.
+  const openFence = codeLines.nth(0);
+  const interior = codeLines.nth(1);
+  const interiorBox = await interior.boundingBox();
+  if (!interiorBox) {
+    record('fence stays visible while editing code', 'fail', 'no interior bbox');
+    return;
+  }
+
+  // Click inside the interior code line to make it active.
+  await page.mouse.click(interiorBox.x + 30, interiorBox.y + interiorBox.height / 2);
+  // Past the freeze tail so the decoration rebuild has applied.
+  await page.waitForTimeout(200);
+
+  const fenceText = (await openFence.textContent())?.trim() ?? '';
+  const visible = /^```/.test(fenceText);
+  record(
+    'fence stays visible while editing code',
+    visible ? 'pass' : 'fail',
+    `fenceLine="${fenceText.slice(0, 40)}"`,
+  );
+}
+
+async function runNewBulletListScenario(page, label, setup, screenshotName) {
+  const uniq = `ITEM_${Date.now().toString(36).slice(-4)}`;
+  await setup(page, uniq);
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, screenshotName), fullPage: false });
+
+  const itemA = page.locator('.cm-line', { hasText: `${uniq}A` }).first();
+  const itemB = page.locator('.cm-line', { hasText: `${uniq}B` }).first();
+  if ((await itemA.count()) === 0 || (await itemB.count()) === 0) {
+    record(`list gap [${label}]`, 'fail', 'items not found');
+    return;
+  }
+  const aBox = await itemA.boundingBox();
+  const bBox = await itemB.boundingBox();
+  if (!aBox || !bBox) {
+    record(`list gap [${label}]`, 'fail', 'no bbox');
+    return;
+  }
+  const gap = bBox.y - (aBox.y + aBox.height);
+  const status = gap < 8 ? 'pass' : gap < 40 ? 'warn' : 'fail';
+
+  // Collect every .cm-line that sits between itemA and itemB vertically
+  // and dump their text so we can see whether an extra blank line
+  // exists in the DOM (and whether it's in the doc or only in the
+  // rendered layout).
+  const between = await page.evaluate(
+    ({ yA, yB }) => {
+      const lines = Array.from(document.querySelectorAll('.cm-line'));
+      return lines
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            mid: r.top + r.height / 2,
+            text: el.textContent ?? '',
+            cls: el.className,
+          };
+        })
+        .filter((info) => info.mid > yA && info.mid < yB)
+        .slice(0, 5);
+    },
+    { yA: aBox.y + aBox.height / 2, yB: bBox.y + bBox.height / 2 },
+  );
+  const betweenStr = between.map((b) => `"${b.text.slice(0, 30)}"[${b.cls.replace(/cm-/g, '')}]`).join(' | ');
+
+  // Dump a wide window of .cm-line divs around the typed items so we
+  // can see the full line structure the editor produced.
+  const docExcerpt = await page.evaluate((marker) => {
+    const lines = Array.from(document.querySelectorAll('.cm-line'));
+    const idx = lines.findIndex((el) => (el.textContent || '').includes(marker + 'A'));
+    if (idx < 0) return null;
+    const slice = lines.slice(Math.max(0, idx - 5), idx + 5);
+    return slice
+      .map((el) => `[${(el.textContent || '').slice(0, 30)}]`)
+      .join(' / ');
+  }, uniq);
+
+  record(
+    `list gap [${label}]`,
+    status,
+    `gap=${gap.toFixed(1)}px between=${betweenStr || '(none)'} doc="${docExcerpt}"`,
+  );
+}
+
+async function probeNewBulletList(page) {
+  // Scenario A: after a plain paragraph, two blank lines, then list.
+  await runNewBulletListScenario(
+    page,
+    'after para +2 blanks',
+    async (p, uniq) => {
+      const para = p.locator('.cm-line:not([class*="cm-atomic"])').nth(3);
+      const box = await para.boundingBox();
+      await p.mouse.click(box.x + 40, box.y + box.height / 2);
+      await p.waitForTimeout(180);
+      await p.keyboard.press('End');
+      await p.keyboard.press('Enter');
+      await p.keyboard.press('Enter');
+      await p.keyboard.type(`- ${uniq}A`);
+      await p.keyboard.press('Enter');
+      await p.keyboard.type(`${uniq}B`);
+    },
+    '20-list-after-para.png',
+  );
+
+  // Scenario B: immediately after a heading, single Enter, then list.
+  // (Obsidian and GFM behave differently about tight/loose lists here.)
+  await runNewBulletListScenario(
+    page,
+    'after h2 +1 blank',
+    async (p, uniq) => {
+      const h2 = p.locator('.cm-line.cm-atomic-h2').nth(1); // second h2 to avoid the first
+      const box = await h2.boundingBox();
+      await p.mouse.click(box.x + 40, box.y + box.height / 2);
+      await p.waitForTimeout(180);
+      await p.keyboard.press('End');
+      await p.keyboard.press('Enter');
+      await p.keyboard.press('Enter');
+      await p.keyboard.type(`- ${uniq}A`);
+      await p.keyboard.press('Enter');
+      await p.keyboard.type(`${uniq}B`);
+    },
+    '21-list-after-h2.png',
+  );
+
+}
+
+async function probeTaskList(page) {
+  // Focus the editor, jump cursor to doc end (stable target regardless of
+  // what earlier probes typed), add a blank line, then write a task item.
+  const content = page.locator('.cm-content').first();
+  await content.click();
+  await page.waitForTimeout(180);
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+
+  const uniq = `TASK_${Date.now().toString(36).slice(-4)}`;
+  await page.keyboard.type(`- [ ] ${uniq}`);
+  await page.waitForTimeout(300);
+
+  const checkboxCount = await page
+    .locator(`.cm-line:has-text("${uniq}") input.cm-atomic-task-checkbox`)
+    .count();
+  record(
+    'task list: checkbox appears',
+    checkboxCount > 0 ? 'pass' : 'fail',
+    `checkbox count on task line = ${checkboxCount}`,
+  );
+  if (checkboxCount === 0) return;
+
+  const checkbox = page
+    .locator(`.cm-line:has-text("${uniq}") input.cm-atomic-task-checkbox`)
+    .first();
+
+  // Click to toggle. Use force: true because the input is a widget and
+  // Playwright's normal actionability checks (not-covered, stable) can
+  // trip over decoration rebuilds.
+  await checkbox.click({ force: true });
+  await page.waitForTimeout(150);
+
+  const checkedNow = await checkbox.evaluate((el) => el.checked);
+  record(
+    'task list: click toggles checked',
+    checkedNow ? 'pass' : 'fail',
+    `checkbox.checked = ${checkedNow}`,
+  );
+
+  // Enter on a task line should create another task (not a plain
+  // bullet). Place cursor at end of the current task, press Enter,
+  // type a marker for the new item, and assert a second checkbox
+  // appears.
+  const nextMarker = `NEXT_${Date.now().toString(36).slice(-4)}`;
+  await page.locator(`.cm-line:has-text("${uniq}")`).first().click({ force: true });
+  await page.waitForTimeout(180);
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(nextMarker);
+  await page.waitForTimeout(200);
+
+  const nextHasCheckbox = await page
+    .locator(`.cm-line:has-text("${nextMarker}") input.cm-atomic-task-checkbox`)
+    .count();
+  record(
+    'task list: Enter continues as task',
+    nextHasCheckbox > 0 ? 'pass' : 'fail',
+    `new line checkbox count = ${nextHasCheckbox}`,
+  );
+
+  const lineClasses = await page
+    .locator(`.cm-line:has-text("${uniq}")`)
+    .first()
+    .evaluate((el) => el.className);
+  const hasDoneClass = /cm-atomic-task-done/.test(lineClasses);
+  record(
+    'task list: completed line strikes through',
+    hasDoneClass ? 'pass' : 'fail',
+    `classes="${lineClasses}"`,
+  );
+
+  await page.screenshot({ path: path.join(SCREENSHOT_DIR, '24-task-list.png'), fullPage: false });
+}
+
 async function probeTyping(page) {
   // Cursor should already be somewhere in the doc. Type a burst of
   // characters and watch CLS.
@@ -265,6 +485,49 @@ async function probeTyping(page) {
   const status = cls.total < 0.05 ? 'pass' : cls.total < 0.2 ? 'warn' : 'fail';
   record('type inside line (CLS)', status, `total=${cls.total.toFixed(3)} shifts=${cls.count}`);
   return cls;
+}
+
+async function probeDeepScrollRenders(page) {
+  // Regression guard for "content past the initial parse window appears
+  // as raw markdown until a click nudges the parser forward." We scroll
+  // to the bottom half of the doc and check that the headings in the
+  // fresh viewport actually picked up their `cm-atomic-h*` classes
+  // (i.e., the decoration plugin rebuilt with a tree that reaches here).
+  const editor = page.locator('.cm-scroller');
+  await editor.evaluate((el) => {
+    el.scrollTop = el.scrollHeight * 0.75;
+  });
+  // Let CM6 re-measure + our plugin rebuild decorations.
+  await page.waitForTimeout(350);
+
+  const headingsInViewport = await page.evaluate(() => {
+    const scroller = document.querySelector('.cm-scroller');
+    if (!scroller) return null;
+    const vRect = scroller.getBoundingClientRect();
+    const lines = Array.from(document.querySelectorAll('.cm-line'));
+    let decorated = 0;
+    let rawHeadings = 0;
+    for (const el of lines) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom < vRect.top || r.top > vRect.bottom) continue;
+      const text = el.textContent || '';
+      const looksLikeHeading = /^#{1,6}\s/.test(text);
+      const hasHeadingClass = /\bcm-atomic-h[1-6]\b/.test(el.className);
+      if (hasHeadingClass) decorated++;
+      // Raw heading = doc-side `## foo` with NO `cm-atomic-h*` class →
+      // the decoration failed to apply. That's the bug.
+      if (looksLikeHeading && !hasHeadingClass) rawHeadings++;
+    }
+    return { decorated, rawHeadings };
+  });
+
+  const status =
+    headingsInViewport && headingsInViewport.rawHeadings === 0 ? 'pass' : 'fail';
+  record(
+    'deep-scroll headings decorate',
+    status,
+    `decorated=${headingsInViewport?.decorated ?? '?'} raw=${headingsInViewport?.rawHeadings ?? '?'}`,
+  );
 }
 
 async function probeScroll(page) {
@@ -383,10 +646,14 @@ async function run() {
 
     await probeIdle(page);
     await probeClickFreeze(page);
+    await probeFenceVisibility(page);
+    await probeNewBulletList(page);
+    await probeTaskList(page);
     await probeCursorPingPong(page);
     await probeTyping(page);
     await probeSelection(page);
     await probeCopyIsRawMarkdown(page);
+    await probeDeepScrollRenders(page);
     await probeScroll(page);
 
     const failCount = results.filter((r) => r.status === 'fail').length;

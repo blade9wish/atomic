@@ -15,7 +15,7 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { markdown, markdownKeymap } from '@codemirror/lang-markdown';
+import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 
 import { ATOMIC_CODE_LANGUAGES } from '../../editor/codemirror/code-languages';
 import {
@@ -71,7 +71,12 @@ export function AtomicCodeMirrorEditor({
           rectangularSelection(),
           highlightActiveLine(),
           EditorView.lineWrapping,
-          markdown({ codeLanguages: ATOMIC_CODE_LANGUAGES }),
+          // markdownLanguage enables GFM (tables, strikethrough, task
+          // lists, autolinks) on top of CommonMark. Without `base:
+          // markdownLanguage`, the parser defaults to pure CommonMark and
+          // never emits TaskMarker nodes, so task-list checkboxes can't
+          // be detected.
+          markdown({ base: markdownLanguage, codeLanguages: ATOMIC_CODE_LANGUAGES }),
           atomicMarkdownSyntax,
           atomicEditorTheme,
           keymap.of([

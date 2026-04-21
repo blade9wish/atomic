@@ -106,3 +106,30 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 0.14em;
 }
+
+/* Bullet widget — replaces the raw `-` / `*` marker on bullet-list items
+ * when the line isn't being edited. Single-char bullet keeps horizontal
+ * alignment (same width as the `-` it replaces). */
+.cm-atomic-bullet {
+  display: inline-block;
+  color: var(--color-text-secondary);
+  font-weight: 700;
+}
+
+/* GFM task-list checkbox widget — replaces `[ ]` / `[x]` in a task-list
+ * item. contenteditable=false on the widget keeps the caret out; clicks
+ * hit our JS listener instead of CM6's selection logic. */
+.cm-atomic-task-checkbox {
+  margin: 0 0.3rem 0 0;
+  vertical-align: -0.08em;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+/* Whole-line strike for completed task items — `text-decoration` on the
+ * line wrapper propagates through nested spans but not the checkbox
+ * (inputs don't inherit text-decoration), which is what we want. */
+.cm-line.cm-atomic-task-done {
+  color: var(--color-text-secondary);
+  text-decoration: line-through;
+}
