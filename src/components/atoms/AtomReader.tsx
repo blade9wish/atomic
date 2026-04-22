@@ -289,7 +289,7 @@ function AtomReaderContent({
                 key={atom.id}
                 documentId={atom.id}
                 markdownSource={editContent}
-                initialSearchText={highlightText}
+                initialRevealText={highlightText}
                 blurEditorOnMount={!initialEditing}
                 onMarkdownChange={setEditContent}
                 onLinkClick={(url) => {

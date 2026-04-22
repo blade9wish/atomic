@@ -8,6 +8,11 @@ interface CommandInputProps {
   isSearching: boolean;
   shortcutHint?: string;
   placeholder?: string;
+  prefix?: {
+    token: string;
+    label: string;
+  } | null;
+  onClearPrefix?: () => void;
 }
 
 export function CommandInput({
@@ -17,6 +22,8 @@ export function CommandInput({
   isSearching,
   shortcutHint = '⌘⇧P',
   placeholder = 'Type a command...',
+  prefix = null,
+  onClearPrefix,
 }: CommandInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -35,14 +42,36 @@ export function CommandInput({
         )}
       </div>
 
+      {prefix ? (
+        <button
+          type="button"
+          onClick={() => {
+            onClearPrefix?.();
+            inputRef.current?.focus();
+          }}
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-hover)] px-2 py-1 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-text-primary)]"
+          title={`Clear ${prefix.label} prefix`}
+        >
+          <span className="font-mono text-[10px] text-[var(--color-accent-light)]">{prefix.token}</span>
+          <span>{prefix.label}</span>
+        </button>
+      ) : null}
+
       <input
         ref={inputRef}
         type="text"
         value={query}
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
+        onKeyDown={(e) => {
+          if (e.key === 'Backspace' && prefix && !query) {
+            e.preventDefault();
+            onClearPrefix?.();
+            return;
+          }
+          onKeyDown(e);
+        }}
         placeholder={placeholder}
-        className="flex-1 bg-transparent text-[var(--color-text-primary)] placeholder-[var(--color-text-tertiary)] outline-none text-base"
+        className="flex-1 min-w-0 bg-transparent text-[var(--color-text-primary)] placeholder-[var(--color-text-tertiary)] outline-none text-base"
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"

@@ -20,7 +20,7 @@ interface WikiArticleContentProps {
   updatedAt: string;
   sourceCount: number;
   titleActions?: ReactNode;
-  onViewAtom: (atomId: string) => void;
+  onViewAtom: (atomId: string, highlightText?: string) => void;
   onNavigateToArticle: (tagId: string, tagName: string) => void;
 }
 

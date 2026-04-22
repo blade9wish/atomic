@@ -14,8 +14,15 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 250;
 const SECTION_LIMIT = 5;
+const HYBRID_ATOM_LIMIT = 12;
+const HYBRID_ATOM_THRESHOLD = 0.3;
 
-type SearchPaletteMode = 'global' | 'tags';
+type SearchPaletteMode = 'global' | 'tags' | 'atoms-hybrid';
+
+type SearchPalettePrefix =
+  | { token: '#'; label: 'tags' }
+  | { token: '>'; label: 'atoms' }
+  | null;
 
 type SearchPaletteItem =
   | { kind: 'atom'; result: SemanticSearchResult }
@@ -58,6 +65,7 @@ export function useSearchPalette({ isOpen, onClose, initialQuery = '' }: UseSear
     chats: [],
     tags: [],
   });
+  const [hybridAtomResults, setHybridAtomResults] = useState<SemanticSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,16 +76,27 @@ export function useSearchPalette({ isOpen, onClose, initialQuery = '' }: UseSear
       setQuery(initialQuery);
       setSelectedIndex(0);
       setGlobalResults({ atoms: [], wiki: [], chats: [], tags: [] });
+      setHybridAtomResults([]);
       setIsSearching(false);
     }
   }, [isOpen, initialQuery]);
 
-  const mode: SearchPaletteMode = query.startsWith('#') ? 'tags' : 'global';
-  const searchQuery = mode === 'tags' ? query.slice(1) : query;
+  const prefix: SearchPalettePrefix = query.startsWith('#')
+    ? { token: '#', label: 'tags' }
+    : query.startsWith('>')
+      ? { token: '>', label: 'atoms' }
+      : null;
+  const mode: SearchPaletteMode = prefix?.token === '#'
+    ? 'tags'
+    : prefix?.token === '>'
+      ? 'atoms-hybrid'
+      : 'global';
+  const searchQuery = prefix ? query.slice(prefix.token.length) : query;
 
   useEffect(() => {
-    if (mode !== 'global') {
+    if (mode !== 'global' && mode !== 'atoms-hybrid') {
       setGlobalResults({ atoms: [], wiki: [], chats: [], tags: [] });
+      setHybridAtomResults([]);
       setIsSearching(false);
       return;
     }
@@ -89,6 +108,7 @@ export function useSearchPalette({ isOpen, onClose, initialQuery = '' }: UseSear
     const trimmed = searchQuery.trim();
     if (trimmed.length < 2) {
       setGlobalResults({ atoms: [], wiki: [], chats: [], tags: [] });
+      setHybridAtomResults([]);
       setIsSearching(false);
       return;
     }
@@ -96,14 +116,26 @@ export function useSearchPalette({ isOpen, onClose, initialQuery = '' }: UseSear
     setIsSearching(true);
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const results = await getTransport().invoke<GlobalSearchResponse>('search_global_keyword', {
-          query: trimmed,
-          sectionLimit: SECTION_LIMIT,
-        });
-        setGlobalResults(results);
+        if (mode === 'atoms-hybrid') {
+          const results = await getTransport().invoke<SemanticSearchResult[]>('search_atoms_hybrid', {
+            query: trimmed,
+            limit: HYBRID_ATOM_LIMIT,
+            threshold: HYBRID_ATOM_THRESHOLD,
+          });
+          setHybridAtomResults(results);
+          setGlobalResults({ atoms: [], wiki: [], chats: [], tags: [] });
+        } else {
+          const results = await getTransport().invoke<GlobalSearchResponse>('search_global_keyword', {
+            query: trimmed,
+            sectionLimit: SECTION_LIMIT,
+          });
+          setGlobalResults(results);
+          setHybridAtomResults([]);
+        }
       } catch (error) {
         console.error('Global search failed:', error);
         setGlobalResults({ atoms: [], wiki: [], chats: [], tags: [] });
+        setHybridAtomResults([]);
       } finally {
         setIsSearching(false);
       }
@@ -154,13 +186,17 @@ export function useSearchPalette({ isOpen, onClose, initialQuery = '' }: UseSear
       return tagResults.map((result) => ({ kind: 'tag', result }));
     }
 
+    if (mode === 'atoms-hybrid') {
+      return hybridAtomResults.map((result) => ({ kind: 'atom' as const, result }));
+    }
+
     return [
       ...globalResults.atoms.map((result) => ({ kind: 'atom' as const, result })),
       ...globalResults.wiki.map((result) => ({ kind: 'wiki' as const, result })),
       ...globalResults.chats.map((result) => ({ kind: 'chat' as const, result })),
       ...globalResults.tags.map((result) => ({ kind: 'tag' as const, result })),
     ];
-  }, [mode, globalResults, tagResults]);
+  }, [mode, globalResults, hybridAtomResults, tagResults]);
 
   const totalItems = flatItems.length;
 
@@ -173,7 +209,10 @@ export function useSearchPalette({ isOpen, onClose, initialQuery = '' }: UseSear
 
       switch (item.kind) {
         case 'atom':
-          useUIStore.getState().openReader(item.result.id, searchQuery.trim());
+          useUIStore.getState().openReader(
+            item.result.id,
+            item.result.matching_chunk_content || searchQuery.trim()
+          );
           break;
         case 'wiki':
           useUIStore.getState().openWikiReader(item.result.tag_id, item.result.tag_name);
@@ -230,10 +269,13 @@ export function useSearchPalette({ isOpen, onClose, initialQuery = '' }: UseSear
   return {
     query,
     setQuery,
+    prefix,
     mode,
+    searchQuery,
     selectedIndex,
     isSearching,
     globalResults,
+    hybridAtomResults,
     tagResults,
     handleKeyDown,
     handleSelect,

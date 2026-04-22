@@ -107,8 +107,8 @@ export function WikiReader({ tagId, tagName }: WikiReaderProps) {
     proposeArticle(tagId, tagName);
   };
 
-  const handleViewAtom = (atomId: string) => {
-    overlayNavigate({ type: 'reader', atomId });
+  const handleViewAtom = (atomId: string, highlightText?: string) => {
+    overlayNavigate({ type: 'reader', atomId, highlightText });
   };
 
   const handleNavigateToArticle = (targetTagId: string, targetTagName: string) => {

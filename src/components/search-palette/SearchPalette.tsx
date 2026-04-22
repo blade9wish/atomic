@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { BookOpen, FileText, Hash, MessageCircle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { CommandInput } from '../command-palette/CommandInput';
 import { useSearchPalette } from './useSearchPalette';
 import {
@@ -21,6 +23,42 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
     <div className="px-4 py-1.5 text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wide flex items-center justify-between">
       <span>{label}</span>
       <span className="normal-case font-normal">{count}</span>
+    </div>
+  );
+}
+
+function SnippetMarkdown({ content }: { content: string }) {
+  return (
+    <div className="mt-1 h-10 overflow-hidden text-xs leading-5 text-[var(--color-text-secondary)] [&_p]:m-0 [&_p]:inline [&_strong]:font-medium [&_strong]:text-[var(--color-text-primary)] [&_em]:italic [&_code]:rounded [&_code]:bg-[var(--color-bg-main)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.95em] [&_del]:opacity-80 [&_ul]:m-0 [&_ol]:m-0 [&_li]:inline [&_li]:list-none [&_h1]:m-0 [&_h2]:m-0 [&_h3]:m-0 [&_h4]:m-0 [&_h5]:m-0 [&_h6]:m-0 [&_h1]:inline [&_h2]:inline [&_h3]:inline [&_h4]:inline [&_h5]:inline [&_h6]:inline [&_blockquote]:m-0 [&_blockquote]:inline [&_pre]:m-0 [&_pre]:inline [&_pre]:bg-transparent">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ children }) => <>{children}</>,
+          img: () => null,
+          hr: () => <> </>,
+          br: () => <> </>,
+          p: ({ children }) => <>{children}</>,
+          li: ({ children }) => <>{children} </>,
+          ul: ({ children }) => <>{children}</>,
+          ol: ({ children }) => <>{children}</>,
+          h1: ({ children }) => <>{children}</>,
+          h2: ({ children }) => <>{children}</>,
+          h3: ({ children }) => <>{children}</>,
+          h4: ({ children }) => <>{children}</>,
+          h5: ({ children }) => <>{children}</>,
+          h6: ({ children }) => <>{children}</>,
+          blockquote: ({ children }) => <>{children}</>,
+          pre: ({ children }) => <>{children}</>,
+          table: ({ children }) => <>{children}</>,
+          thead: ({ children }) => <>{children}</>,
+          tbody: ({ children }) => <>{children}</>,
+          tr: ({ children }) => <>{children} </>,
+          th: ({ children }) => <>{children} </>,
+          td: ({ children }) => <>{children} </>,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -55,7 +93,7 @@ function PaletteItem({
           <span className="truncate text-sm font-medium text-[var(--color-text-primary)]">{title}</span>
           {meta ? <span className="text-[10px] text-[var(--color-text-tertiary)] shrink-0">{meta}</span> : null}
         </div>
-        {subtitle ? <p className="mt-1 text-xs text-[var(--color-text-secondary)] line-clamp-2">{subtitle}</p> : null}
+        {subtitle ? <SnippetMarkdown content={subtitle} /> : null}
       </div>
     </button>
   );
@@ -69,12 +107,14 @@ function atomTitle(result: SemanticSearchResult): string {
 export function SearchPalette({ isOpen, onClose, initialQuery = '' }: SearchPaletteProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const {
-    query,
     setQuery,
+    prefix,
     mode,
+    searchQuery,
     selectedIndex,
     isSearching,
     globalResults,
+    hybridAtomResults,
     tagResults,
     handleKeyDown,
     handleSelect,
@@ -95,6 +135,14 @@ export function SearchPalette({ isOpen, onClose, initialQuery = '' }: SearchPale
     if (e.target === overlayRef.current) {
       onClose();
     }
+  };
+
+  const handleInputChange = (value: string) => {
+    setQuery(prefix ? `${prefix.token}${value}` : value);
+  };
+
+  const handleClearPrefix = () => {
+    setQuery(searchQuery);
   };
 
   let runningIndex = 0;
@@ -188,8 +236,9 @@ export function SearchPalette({ isOpen, onClose, initialQuery = '' }: SearchPale
 
   const showEmptyState =
     !isSearching &&
-    query.trim().length >= 2 &&
+    searchQuery.trim().length >= 2 &&
     ((mode === 'tags' && tagResults.length === 0) ||
+      (mode === 'atoms-hybrid' && hybridAtomResults.length === 0) ||
       (mode === 'global' &&
         globalResults.atoms.length === 0 &&
         globalResults.wiki.length === 0 &&
@@ -205,26 +254,34 @@ export function SearchPalette({ isOpen, onClose, initialQuery = '' }: SearchPale
     >
       <div className="w-full max-w-2xl mx-4 bg-[var(--color-bg-panel)] rounded-xl shadow-2xl border border-[var(--color-border)] animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
         <CommandInput
-          query={query}
-          onChange={setQuery}
+          query={searchQuery}
+          onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           isSearching={isSearching}
+          prefix={prefix}
+          onClearPrefix={handleClearPrefix}
           shortcutHint="⌘P"
-          placeholder={mode === 'tags' ? 'Search tags...' : 'Search atoms, wiki, chats, and tags...'}
+          placeholder={
+            mode === 'tags'
+              ? 'Search tags...'
+              : mode === 'atoms-hybrid'
+                ? 'Search atoms semantically...'
+                : 'Search atoms, wiki, chats, and tags...'
+          }
         />
 
         <div className="overflow-y-auto max-h-[50vh] py-2">
-          {!query.trim() ? (
+          {!searchQuery.trim() ? (
             <div className="px-4 py-8 text-center text-[var(--color-text-tertiary)] text-sm">
-              Start typing to search across Atomic. Use `#` for exact-ish tag search.
+              Start typing to search across Atomic. Use `#` for tags or `&gt;` for semantic atom search.
             </div>
-          ) : query.trim().length < 2 && mode === 'global' ? (
+          ) : searchQuery.trim().length < 2 && mode !== 'tags' ? (
             <div className="px-4 py-8 text-center text-[var(--color-text-tertiary)] text-sm">
               Type at least 2 characters to search.
             </div>
           ) : null}
 
-          {mode === 'global' && query.trim().length >= 2 ? (
+          {mode === 'global' && searchQuery.trim().length >= 2 ? (
             <>
               {renderAtoms(globalResults.atoms)}
               {renderWiki(globalResults.wiki)}
@@ -233,11 +290,13 @@ export function SearchPalette({ isOpen, onClose, initialQuery = '' }: SearchPale
             </>
           ) : null}
 
-          {mode === 'tags' && query.trim().length >= 2 ? renderTags(tagResults) : null}
+          {mode === 'atoms-hybrid' && searchQuery.trim().length >= 2 ? renderAtoms(hybridAtomResults) : null}
+
+          {mode === 'tags' && searchQuery.trim().length >= 2 ? renderTags(tagResults) : null}
 
           {showEmptyState ? (
             <div className="px-4 py-8 text-center text-[var(--color-text-tertiary)] text-sm">
-              No matches found for "{mode === 'tags' ? query.slice(1) : query}".
+              No matches found for "{searchQuery}".
             </div>
           ) : null}
         </div>
@@ -261,6 +320,10 @@ export function SearchPalette({ isOpen, onClose, initialQuery = '' }: SearchPale
             <span className="flex items-center gap-1">
               <kbd className="px-1 py-0.5 bg-[var(--color-bg-hover)] rounded">#</kbd>
               tags only
+            </span>
+            <span className="flex items-center gap-1">
+              <kbd className="px-1 py-0.5 bg-[var(--color-bg-hover)] rounded">&gt;</kbd>
+              semantic atoms
             </span>
           </div>
         </div>

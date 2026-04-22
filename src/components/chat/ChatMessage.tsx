@@ -9,7 +9,7 @@ import remarkGfm from 'remark-gfm';
 interface ChatMessageProps {
   message: ChatMessageWithContext;
   isStreaming?: boolean;
-  onViewAtom?: (atomId: string) => void;
+  onViewAtom?: (atomId: string, highlightText?: string) => void;
   searchQuery?: string;
   highlightText?: (text: string) => ReactNode;
 }
@@ -37,9 +37,9 @@ export function ChatMessage({ message, isStreaming = false, onViewAtom, searchQu
     setAnchorRect(null);
   };
 
-  const handleViewAtom = (atomId: string) => {
+  const handleViewAtom = (atomId: string, highlightText?: string) => {
     if (onViewAtom) {
-      onViewAtom(atomId);
+      onViewAtom(atomId, highlightText);
     }
     handleClosePopover();
   };
