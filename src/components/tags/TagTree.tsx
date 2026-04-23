@@ -207,7 +207,7 @@ export function TagTree({ onOpenTagSettings }: TagTreeProps = {}) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* All Atoms option */}
+      {/* All Tags option */}
       <div
         className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors shrink-0 ${
           selectedTagId === null
@@ -217,7 +217,7 @@ export function TagTree({ onOpenTagSettings }: TagTreeProps = {}) {
         onClick={() => handleSelectTag(null)}
       >
         <Inbox className="w-4 h-4" strokeWidth={2} />
-        <span className="flex-1 text-sm font-medium">All Atoms</span>
+        <span className="flex-1 text-sm font-medium">All Tags</span>
       </div>
 
       {/* Tags header with search button */}

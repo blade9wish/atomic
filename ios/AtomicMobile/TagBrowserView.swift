@@ -26,7 +26,7 @@ struct DrawerView: View {
             // Tag tree
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    // All Atoms row
+                    // All Tags row
                     Button {
                         Task {
                             await store.selectTag(nil)
@@ -34,7 +34,7 @@ struct DrawerView: View {
                         }
                     } label: {
                         HStack {
-                            Text("All Atoms")
+                            Text("All Tags")
                                 .foregroundStyle(Theme.textPrimary)
                             Spacer()
                             if store.selectedTagId == nil {
