@@ -1178,11 +1178,12 @@ pub fn delete_article(conn: &Connection, tag_id: &str) -> Result<(), String> {
 pub fn load_all_wiki_articles(conn: &Connection) -> Result<Vec<WikiArticleSummary>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT w.id, w.tag_id, t.name as tag_name, w.updated_at, w.atom_count,
+            "SELECT w.id, w.tag_id, t.name as tag_name, w.updated_at,
+                    (SELECT COUNT(DISTINCT at.atom_id) FROM atom_tags at WHERE at.tag_id = w.tag_id) as atom_count,
                     (SELECT COUNT(*) FROM wiki_links wl WHERE wl.target_tag_id = w.tag_id) as inbound_links
              FROM wiki_articles w
              JOIN tags t ON w.tag_id = t.id
-             ORDER BY inbound_links DESC, w.atom_count DESC, w.updated_at DESC",
+             ORDER BY inbound_links DESC, atom_count DESC, w.updated_at DESC",
         )
         .map_err(|e| format!("Failed to prepare wiki articles query: {}", e))?;
 
