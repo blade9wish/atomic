@@ -87,6 +87,12 @@ pub enum ServerEvent {
     AtomCreated {
         atom: atomic_core::AtomWithTags,
     },
+    AtomUpdated {
+        atom: atomic_core::AtomWithTags,
+    },
+    AtomChanged {
+        atom: atomic_core::AtomWithTags,
+    },
 
     // Import progress events
     ImportProgress {
@@ -338,6 +344,14 @@ impl From<atomic_core::ChatEvent> for ServerEvent {
                 action,
                 params,
             },
+            atomic_core::ChatEvent::AtomCreated {
+                conversation_id: _,
+                atom,
+            } => ServerEvent::AtomChanged { atom },
+            atomic_core::ChatEvent::AtomUpdated {
+                conversation_id: _,
+                atom,
+            } => ServerEvent::AtomChanged { atom },
             atomic_core::ChatEvent::Error {
                 conversation_id,
                 error,

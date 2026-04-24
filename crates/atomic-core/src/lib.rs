@@ -55,7 +55,7 @@ pub mod tokens;
 pub mod wiki;
 
 // Re-exports for convenience
-pub use agent::{CanvasClusterSummary, CanvasContext, ChatEvent};
+pub use agent::{CanvasClusterSummary, CanvasContext, ChatEvent, PageContext};
 pub use briefing::{Briefing, BriefingCitation, BriefingWithCitations};
 pub use db::Database;
 pub use embedding::EmbeddingEvent;
@@ -2122,13 +2122,14 @@ impl AtomicCore {
         .map_err(|e| AtomicCoreError::DatabaseOperation(e))
     }
 
-    /// Send a chat message with canvas context for canvas-aware tools.
+    /// Send a chat message with optional UI context for page-aware and canvas-aware tools.
     pub async fn send_chat_message_with_canvas<F>(
         &self,
         conversation_id: &str,
         content: &str,
         on_event: F,
         canvas_context: Option<CanvasContext>,
+        page_context: Option<PageContext>,
     ) -> Result<ChatMessageWithContext, AtomicCoreError>
     where
         F: Fn(ChatEvent) + Send + Sync,
@@ -2140,6 +2141,8 @@ impl AtomicCore {
             on_event,
             self.settings_for_background(),
             canvas_context,
+            page_context,
+            Some(self.canvas_cache.clone()),
         )
         .await
         .map_err(|e| AtomicCoreError::DatabaseOperation(e))

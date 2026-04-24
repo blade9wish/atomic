@@ -44,14 +44,15 @@ export function ChatMessage({ message, isStreaming = false, onViewAtom, searchQu
     handleClosePopover();
   };
 
-  // Process text to replace [N] patterns with CitationLink components
-  // Returns array of strings and CitationLink elements (strings for highlighting, elements for citations)
+  // Process text to replace [N] citations and [[atom-id]] references with
+  // interactive components. Strings stay as strings so search highlighting can
+  // still operate on ordinary text.
   const processTextWithCitations = (text: string): (string | JSX.Element)[] => {
-    const parts = text.split(/(\[\d+\])/g);
+    const parts = text.split(/(\[\d+\]|\[\[[0-9a-fA-F-]{36}\]\])/g);
     return parts.map((part, i) => {
-      const match = part.match(/\[(\d+)\]/);
-      if (match) {
-        const index = parseInt(match[1], 10);
+      const citationMatch = part.match(/^\[(\d+)\]$/);
+      if (citationMatch) {
+        const index = parseInt(citationMatch[1], 10);
         const citation = citationMap.get(index);
         if (citation) {
           return (
@@ -62,6 +63,22 @@ export function ChatMessage({ message, isStreaming = false, onViewAtom, searchQu
             />
           );
         }
+      }
+
+      const atomMatch = part.match(/^\[\[([0-9a-fA-F-]{36})\]\]$/);
+      if (atomMatch) {
+        const atomId = atomMatch[1];
+        return (
+          <button
+            key={`atom-link-${i}-${atomId}`}
+            type="button"
+            onClick={() => handleViewAtom(atomId)}
+            className="inline-flex items-center rounded px-1 py-0.5 font-mono text-[0.85em] text-[var(--color-accent-light)] underline decoration-[var(--color-border-hover)] underline-offset-2 hover:decoration-current hover:bg-[var(--color-bg-hover)]"
+            title={`Open atom ${atomId}`}
+          >
+            {`[[${atomId.slice(0, 8)}]]`}
+          </button>
+        );
       }
       // Return raw string so highlighting can be applied
       return part;

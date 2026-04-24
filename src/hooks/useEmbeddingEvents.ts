@@ -123,6 +123,15 @@ export function useEmbeddingEvents() {
       recordAtomsEnqueued(1);
     });
 
+    const unsubAtomUpdated = transport.subscribe<AtomWithTags>('atom-updated', (payload) => {
+      useAtomsStore.getState().addAtom(payload);
+      recordAtomsEnqueued(1);
+    });
+
+    const unsubAtomChanged = transport.subscribe<AtomWithTags>('atom-changed', (payload) => {
+      useAtomsStore.getState().addAtom(payload);
+    });
+
     // Listen for ingestion-complete events (URL ingest / feed polling)
     // Fetch the full atom by ID since the event only contains the atom_id
     const unsubIngestionComplete = transport.subscribe<{ atom_id: string }>('ingestion-complete', (payload) => {
@@ -254,6 +263,8 @@ export function useEmbeddingEvents() {
       clearTimeout(refetchDebounceTimer.current);
       clearTimeout(progressCleanupTimer.current);
       unsubAtomCreated();
+      unsubAtomUpdated();
+      unsubAtomChanged();
       unsubIngestionComplete();
       unsubEmbeddingComplete();
       unsubTaggingComplete();

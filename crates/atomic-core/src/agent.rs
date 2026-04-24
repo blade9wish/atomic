@@ -6,7 +6,8 @@
 
 use crate::chunking::count_tokens;
 use crate::models::{
-    ChatCitation, ChatMessage, ChatMessageWithContext, ChatToolCall, SemanticSearchResult,
+    AtomWithTags, ChatCitation, ChatMessage, ChatMessageWithContext, ChatToolCall,
+    SemanticSearchResult,
 };
 use crate::providers::traits::LlmConfig;
 use crate::providers::types::{
@@ -56,6 +57,16 @@ pub enum ChatEvent {
         conversation_id: String,
         action: String,
         params: serde_json::Value,
+    },
+    /// Atom created by a chat tool
+    AtomCreated {
+        conversation_id: String,
+        atom: AtomWithTags,
+    },
+    /// Atom updated by a chat tool
+    AtomUpdated {
+        conversation_id: String,
+        atom: AtomWithTags,
     },
     /// Error during chat
     Error {
@@ -119,7 +130,156 @@ fn get_tools() -> Vec<ToolDefinition> {
                 "required": ["atom_id"]
             }),
         ),
+        ToolDefinition::new(
+            "create_atom",
+            "Create a new atom with markdown content. Only use this when the user explicitly asks you to create, save, draft, or add a new atom/note. Do not call this for ordinary answers. After creating an atom, mention it in your final response using [[atom_id]] so the UI can link to it.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "Full markdown content for the new atom"
+                    },
+                    "source_url": {
+                        "type": "string",
+                        "description": "Optional source URL for the atom"
+                    },
+                    "published_at": {
+                        "type": "string",
+                        "description": "Optional ISO 8601 publication date"
+                    },
+                    "tag_ids": {
+                        "type": "array",
+                        "description": "Optional existing tag IDs to assign",
+                        "items": { "type": "string" },
+                        "default": []
+                    }
+                },
+                "required": ["content"]
+            }),
+        ),
+        ToolDefinition::new(
+            "update_atom",
+            "Replace an existing atom's markdown content. Only use this when the user explicitly asks you to update, edit, rewrite, append to, or otherwise modify an atom. Never update atoms just because you found useful information. The content argument is a full replacement, so call get_atom first unless the user already provided the complete new content. If the user says to update \"this atom\", call get_current_page_context first to get the atom_id.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "atom_id": {
+                        "type": "string",
+                        "description": "The ID of the atom to update"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full replacement markdown content for the atom"
+                    },
+                    "source_url": {
+                        "type": "string",
+                        "description": "Optional replacement source URL. Omit to preserve the current source URL."
+                    },
+                    "published_at": {
+                        "type": "string",
+                        "description": "Optional replacement publication date. Omit to preserve the current publication date."
+                    },
+                    "tag_ids": {
+                        "type": "array",
+                        "description": "Optional replacement list of existing tag IDs. Omit to preserve current tags; pass [] to clear tags.",
+                        "items": { "type": "string" }
+                    }
+                },
+                "required": ["atom_id", "content"]
+            }),
+        ),
     ]
+}
+
+// ==================== UI Context ====================
+
+/// Context about the user's current app view, passed from the frontend with a
+/// chat turn. This stays compact so the agent can explicitly retrieve full
+/// content through tools instead of receiving hidden prompt content.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PageContext {
+    #[serde(default)]
+    pub view: Option<String>,
+    #[serde(default)]
+    pub atom_id: Option<String>,
+    #[serde(default)]
+    pub atom_title: Option<String>,
+    #[serde(default)]
+    pub atom_snippet: Option<String>,
+    #[serde(default)]
+    pub wiki_tag_id: Option<String>,
+    #[serde(default)]
+    pub wiki_tag_name: Option<String>,
+    #[serde(default)]
+    pub selected_tag_id: Option<String>,
+}
+
+fn get_page_context_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition::new(
+        "get_current_page_context",
+        "Get compact context about what the user is currently viewing in Atomic, such as the visible atom, wiki page, selected tag, and a short atom snippet. Use this first when the user says things like \"this atom\", \"the note I'm reading\", \"this page\", \"what I'm looking at\", or otherwise refers to visible UI context.",
+        json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+    )]
+}
+
+fn get_page_context_system_prompt() -> &'static str {
+    r#"
+
+You can inspect the user's current Atomic UI context with get_current_page_context.
+Use it before answering when the user refers to "this", "current", "open", "visible", or the note/page they are reading. If it returns an atom_id and you need more than the snippet, call get_atom with that atom_id before answering."#
+}
+
+async fn execute_get_current_page_context(
+    storage: &StorageBackend,
+    page_context: Option<&PageContext>,
+) -> Result<Option<serde_json::Value>, String> {
+    let Some(ctx) = page_context else {
+        return Ok(None);
+    };
+
+    let mut visible_atom = serde_json::Value::Null;
+    if let Some(atom_id) = ctx.atom_id.as_deref().filter(|id| !id.is_empty()) {
+        let stored_atom = storage
+            .get_atom_impl(atom_id)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        visible_atom = match stored_atom {
+            Some(atom_with_tags) => json!({
+                "id": atom_with_tags.atom.id,
+                "title": atom_with_tags.atom.title,
+                "snippet": atom_with_tags.atom.snippet,
+                "source_url": atom_with_tags.atom.source_url,
+                "tags": atom_with_tags
+                    .tags
+                    .into_iter()
+                    .map(|tag| json!({ "id": tag.id, "name": tag.name }))
+                    .collect::<Vec<_>>(),
+            }),
+            None => json!({
+                "id": atom_id,
+                "title": ctx.atom_title.as_deref(),
+                "snippet": ctx.atom_snippet.as_deref(),
+                "not_found": true,
+            }),
+        };
+    }
+
+    Ok(Some(json!({
+        "view": ctx.view.as_deref(),
+        "visible_atom": visible_atom,
+        "wiki": {
+            "tag_id": ctx.wiki_tag_id.as_deref(),
+            "tag_name": ctx.wiki_tag_name.as_deref(),
+        },
+        "selected_tag_id": ctx.selected_tag_id.as_deref(),
+    })))
 }
 
 // ==================== Canvas Context ====================
@@ -325,6 +485,127 @@ async fn execute_get_atom(
     Ok(Some(format!("{}{}", header, slice)))
 }
 
+fn parse_optional_string_arg(args: &serde_json::Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn parse_tag_ids_arg(args: &serde_json::Value) -> Vec<String> {
+    args.get("tag_ids")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn execute_create_atom(
+    storage: &StorageBackend,
+    tool_args: &serde_json::Value,
+    external_settings: Option<std::collections::HashMap<String, String>>,
+    canvas_cache: Option<&crate::CanvasCache>,
+) -> Result<AtomWithTags, String> {
+    let content = tool_args["content"].as_str().unwrap_or("").to_string();
+    if content.trim().is_empty() {
+        return Err("Cannot create an empty atom".to_string());
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let request = crate::CreateAtomRequest {
+        content: content.clone(),
+        source_url: parse_optional_string_arg(tool_args, "source_url"),
+        published_at: parse_optional_string_arg(tool_args, "published_at"),
+        tag_ids: parse_tag_ids_arg(tool_args),
+        skip_if_source_exists: false,
+    };
+
+    let atom = storage
+        .insert_atom_impl(&id, &request, &now)
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some(cache) = canvas_cache {
+        cache.invalidate();
+    }
+
+    crate::embedding::spawn_embedding_task_single_with_settings(
+        storage.clone(),
+        id,
+        content,
+        |_| {},
+        external_settings,
+    );
+
+    Ok(atom)
+}
+
+async fn execute_update_atom(
+    storage: &StorageBackend,
+    tool_args: &serde_json::Value,
+    external_settings: Option<std::collections::HashMap<String, String>>,
+    canvas_cache: Option<&crate::CanvasCache>,
+) -> Result<Option<AtomWithTags>, String> {
+    let atom_id = tool_args["atom_id"].as_str().unwrap_or("");
+    let Some(existing) = storage
+        .get_atom_impl(atom_id)
+        .await
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(None);
+    };
+
+    let content = tool_args["content"].as_str().unwrap_or("").to_string();
+    if content.trim().is_empty() {
+        return Err("Cannot update an atom to empty content".to_string());
+    }
+
+    let source_url = if tool_args.get("source_url").is_some() {
+        parse_optional_string_arg(tool_args, "source_url")
+    } else {
+        existing.atom.source_url
+    };
+    let published_at = if tool_args.get("published_at").is_some() {
+        parse_optional_string_arg(tool_args, "published_at")
+    } else {
+        existing.atom.published_at
+    };
+    let tag_ids = tool_args
+        .get("tag_ids")
+        .and_then(|value| value.as_array().map(|_| parse_tag_ids_arg(tool_args)));
+
+    let now = Utc::now().to_rfc3339();
+    let request = crate::UpdateAtomRequest {
+        content: content.clone(),
+        source_url,
+        published_at,
+        tag_ids,
+    };
+    let atom = storage
+        .update_atom_impl(atom_id, &request, &now)
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some(cache) = canvas_cache {
+        cache.invalidate();
+    }
+
+    crate::embedding::spawn_embedding_task_single_with_settings(
+        storage.clone(),
+        atom_id.to_string(),
+        content,
+        |_| {},
+        external_settings,
+    );
+
+    Ok(Some(atom))
+}
+
 // ==================== System Prompt ====================
 
 fn get_system_prompt(scope_description: &str) -> String {
@@ -334,7 +615,9 @@ fn get_system_prompt(scope_description: &str) -> String {
 {}
 
 Guidelines:
-- ALWAYS use the search_atoms tool first to find relevant information before answering
+- Use search_atoms to find relevant information before answering, unless another available tool more directly addresses the user's request
+- Only call create_atom or update_atom when the user explicitly asks you to create or modify an atom
+- When you create a new atom, include [[atom_id]] in the final response so the user can open it
 - If the initial search doesn't find enough, try different search queries
 - When you find relevant information, cite it using [N] notation where N is a sequential number
 - Be honest if you cannot find information - do not make things up
@@ -501,7 +784,7 @@ struct AgentContext {
     conversation_id: String,
     scope_tag_ids: Vec<String>,
     messages: Vec<Message>,
-    citations: Vec<(String, i32, String)>, // (atom_id, chunk_index, excerpt)
+    citations: Vec<(String, Option<i32>, String)>, // (atom_id, chunk_index, excerpt)
     tool_calls_record: Vec<ChatToolCall>,
 }
 
@@ -512,7 +795,9 @@ async fn run_agent_loop<F>(
     model: String,
     mut ctx: AgentContext,
     external_settings: Option<std::collections::HashMap<String, String>>,
+    page_context: Option<&PageContext>,
     canvas_context: Option<&CanvasContext>,
+    canvas_cache: Option<&crate::CanvasCache>,
 ) -> Result<ChatMessageWithContext, String>
 where
     F: Fn(ChatEvent) + Send + Sync,
@@ -520,6 +805,9 @@ where
     let provider = create_streaming_llm_provider(&provider_config)
         .map_err(|e| format!("Failed to create streaming provider: {}", e))?;
     let mut tools = get_tools();
+    if page_context.is_some() {
+        tools.extend(get_page_context_tools());
+    }
     if canvas_context.is_some() {
         tools.extend(get_canvas_tools());
     }
@@ -618,7 +906,7 @@ where
                                 for result in results.iter() {
                                     ctx.citations.push((
                                         result.atom.atom.id.clone(),
-                                        result.matching_chunk_index,
+                                        Some(result.matching_chunk_index),
                                         result.matching_chunk_content.chars().take(200).collect(),
                                     ));
                                 }
@@ -654,7 +942,131 @@ where
                             .map(|v| (v as usize).clamp(1, GET_ATOM_MAX_LIMIT))
                             .unwrap_or(GET_ATOM_DEFAULT_LIMIT);
                         match execute_get_atom(&storage, atom_id, offset, limit).await {
-                            Ok(Some(content)) => (content, 1),
+                            Ok(Some(content)) => {
+                                let citation_index = ctx.citations.len() + 1;
+                                ctx.citations.push((
+                                    atom_id.to_string(),
+                                    None,
+                                    content.chars().take(200).collect(),
+                                ));
+                                (
+                                    format!(
+                                        "[{}] (atom_id: {})\n{}",
+                                        citation_index, atom_id, content
+                                    ),
+                                    1,
+                                )
+                            }
+                            Ok(None) => ("Atom not found".to_string(), 0),
+                            Err(e) => (format!("Error: {}", e), 0),
+                        }
+                    }
+                    "get_current_page_context" => {
+                        match execute_get_current_page_context(&storage, page_context).await {
+                            Ok(Some(mut context)) => {
+                                let visible_atom_id = context
+                                    .get("visible_atom")
+                                    .and_then(|atom| atom.get("id"))
+                                    .and_then(|id| id.as_str())
+                                    .map(str::to_string);
+
+                                if let Some(atom_id) = visible_atom_id {
+                                    let excerpt: String = context
+                                        .get("visible_atom")
+                                        .and_then(|atom| atom.get("snippet"))
+                                        .and_then(|snippet| snippet.as_str())
+                                        .unwrap_or("")
+                                        .chars()
+                                        .take(200)
+                                        .collect();
+                                    if !excerpt.is_empty() {
+                                        let citation_index = ctx.citations.len() + 1;
+                                        ctx.citations.push((atom_id, None, excerpt));
+                                        if let Some(atom) = context
+                                            .get_mut("visible_atom")
+                                            .and_then(|atom| atom.as_object_mut())
+                                        {
+                                            atom.insert(
+                                                "citation_index".to_string(),
+                                                json!(citation_index),
+                                            );
+                                        }
+                                    }
+                                }
+
+                                (
+                                    serde_json::to_string_pretty(&context)
+                                        .unwrap_or_else(|_| context.to_string()),
+                                    1,
+                                )
+                            }
+                            Ok(None) => ("No current page context was provided.".to_string(), 0),
+                            Err(e) => (format!("Error: {}", e), 0),
+                        }
+                    }
+                    "create_atom" => {
+                        match execute_create_atom(
+                            &storage,
+                            &tool_args,
+                            external_settings.clone(),
+                            canvas_cache,
+                        )
+                        .await
+                        {
+                            Ok(atom) => {
+                                on_event(ChatEvent::AtomCreated {
+                                    conversation_id: ctx.conversation_id.clone(),
+                                    atom: atom.clone(),
+                                });
+                                ctx.citations.push((
+                                    atom.atom.id.clone(),
+                                    None,
+                                    atom.atom.snippet.chars().take(200).collect(),
+                                ));
+                                (
+                                    serde_json::to_string_pretty(&json!({
+                                        "atom_id": atom.atom.id,
+                                        "title": atom.atom.title,
+                                        "snippet": atom.atom.snippet,
+                                        "reference": format!("[[{}]]", atom.atom.id),
+                                    }))
+                                    .unwrap_or_else(|_| atom.atom.id),
+                                    1,
+                                )
+                            }
+                            Err(e) => (format!("Error: {}", e), 0),
+                        }
+                    }
+                    "update_atom" => {
+                        match execute_update_atom(
+                            &storage,
+                            &tool_args,
+                            external_settings.clone(),
+                            canvas_cache,
+                        )
+                        .await
+                        {
+                            Ok(Some(atom)) => {
+                                on_event(ChatEvent::AtomUpdated {
+                                    conversation_id: ctx.conversation_id.clone(),
+                                    atom: atom.clone(),
+                                });
+                                ctx.citations.push((
+                                    atom.atom.id.clone(),
+                                    None,
+                                    atom.atom.snippet.chars().take(200).collect(),
+                                ));
+                                (
+                                    serde_json::to_string_pretty(&json!({
+                                        "atom_id": atom.atom.id,
+                                        "title": atom.atom.title,
+                                        "snippet": atom.atom.snippet,
+                                        "reference": format!("[[{}]]", atom.atom.id),
+                                    }))
+                                    .unwrap_or_else(|_| atom.atom.id),
+                                    1,
+                                )
+                            }
                             Ok(None) => ("Atom not found".to_string(), 0),
                             Err(e) => (format!("Error: {}", e), 0),
                         }
@@ -717,7 +1129,7 @@ where
                     message_id: String::new(), // Set when saving
                     citation_index: (i + 1) as i32,
                     atom_id: atom_id.clone(),
-                    chunk_index: Some(*chunk_index),
+                    chunk_index: *chunk_index,
                     excerpt: excerpt.clone(),
                     relevance_score: None,
                 })
@@ -859,6 +1271,8 @@ where
         ctx,
         Some(settings_map),
         None,
+        None,
+        None,
     )
     .await?;
 
@@ -898,7 +1312,8 @@ where
     Ok(result)
 }
 
-/// Like `send_chat_message_with_settings` but with canvas context for canvas-aware tools.
+/// Like `send_chat_message_with_settings` but with optional UI context for
+/// page-aware and canvas-aware tools.
 pub async fn send_chat_message_with_canvas<F>(
     storage: StorageBackend,
     conversation_id: &str,
@@ -906,6 +1321,8 @@ pub async fn send_chat_message_with_canvas<F>(
     on_event: F,
     external_settings: Option<std::collections::HashMap<String, String>>,
     canvas_context: Option<CanvasContext>,
+    page_context: Option<PageContext>,
+    canvas_cache: Option<crate::CanvasCache>,
 ) -> Result<ChatMessageWithContext, String>
 where
     F: Fn(ChatEvent) + Send + Sync,
@@ -971,6 +1388,9 @@ where
 
     // Build message history for API, with canvas context appended to system prompt
     let mut system_prompt = get_system_prompt(&scope_description);
+    if page_context.is_some() {
+        system_prompt.push_str(get_page_context_system_prompt());
+    }
     if let Some(ref ctx) = canvas_context {
         system_prompt.push_str(&get_canvas_system_prompt(ctx));
     }
@@ -1000,7 +1420,9 @@ where
         model,
         ctx,
         Some(settings_map),
+        page_context.as_ref(),
         canvas_context.as_ref(),
+        canvas_cache.as_ref(),
     )
     .await?;
 
