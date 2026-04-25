@@ -279,7 +279,7 @@ pub async fn truncate_postgres_for_test(url: &str) {
     let _ = sqlx::raw_sql(
         "TRUNCATE atoms, tags, atom_tags, atom_chunks, atom_positions, \
          semantic_edges, atom_clusters, tag_embeddings, \
-         wiki_articles, wiki_citations, wiki_links, wiki_article_versions, \
+         wiki_articles, wiki_citations, wiki_links, wiki_article_versions, atom_links, \
          conversations, conversation_tags, chat_messages, chat_tool_calls, chat_citations, \
          feeds, feed_tags, feed_items, settings, \
          briefing_citations, briefings, oauth_codes, oauth_clients, api_tokens \

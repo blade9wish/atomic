@@ -91,6 +91,19 @@ export const COMMAND_MAP: Record<string, CommandSpec> = {
     method: 'DELETE',
     path: (a) => `/api/atoms/${encodeURIComponent(a.id as string)}`,
   },
+  get_atom_link_suggestions: {
+    method: 'GET',
+    path: (a) => {
+      const params = new URLSearchParams();
+      if (a.q != null) params.set('q', String(a.q));
+      if (a.limit != null) params.set('limit', String(a.limit));
+      return `/api/atoms/link-suggestions${params.toString() ? `?${params}` : ''}`;
+    },
+  },
+  get_atom_links: {
+    method: 'GET',
+    path: (a) => `/api/atoms/${encodeURIComponent(a.id as string)}/links`,
+  },
 
   // ==================== Tags ====================
   get_all_tags: {

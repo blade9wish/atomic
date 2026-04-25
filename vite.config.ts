@@ -5,6 +5,17 @@ import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
 const isWebBuild = process.env.VITE_BUILD_TARGET === 'web'
+const EDITOR_PEER_DEPS = [
+  '@codemirror/autocomplete',
+  '@codemirror/commands',
+  '@codemirror/lang-markdown',
+  '@codemirror/language',
+  '@codemirror/search',
+  '@codemirror/state',
+  '@codemirror/view',
+  '@lezer/common',
+  '@lezer/highlight',
+]
 const EDITOR_DEPENDENCY_MARKERS = [
   `${path.sep}node_modules${path.sep}@codemirror${path.sep}`,
   `${path.sep}node_modules${path.sep}@lezer${path.sep}`,
@@ -121,17 +132,23 @@ export default defineConfig({
         }
       : undefined,
   },
-  resolve: isWebBuild
-    ? {
-        alias: {
-          '@tauri-apps/api/core': path.resolve(__dirname, 'src/lib/stubs/tauri-core.ts'),
-          '@tauri-apps/api/event': path.resolve(__dirname, 'src/lib/stubs/tauri-event.ts'),
-          '@tauri-apps/plugin-dialog': path.resolve(__dirname, 'src/lib/stubs/tauri-dialog.ts'),
-          '@tauri-apps/plugin-opener': path.resolve(__dirname, 'src/lib/stubs/tauri-opener.ts'),
-          '@tauri-apps/plugin-fs': path.resolve(__dirname, 'src/lib/stubs/tauri-fs.ts'),
-        },
-      }
-    : undefined,
+  resolve: {
+    // Required when developing against a local file:../atomic-editor package.
+    // CM6 extensions use instanceof checks internally, so the editor package
+    // and the app must share one copy of each CodeMirror peer dependency.
+    dedupe: EDITOR_PEER_DEPS,
+    ...(isWebBuild
+      ? {
+          alias: {
+            '@tauri-apps/api/core': path.resolve(__dirname, 'src/lib/stubs/tauri-core.ts'),
+            '@tauri-apps/api/event': path.resolve(__dirname, 'src/lib/stubs/tauri-event.ts'),
+            '@tauri-apps/plugin-dialog': path.resolve(__dirname, 'src/lib/stubs/tauri-dialog.ts'),
+            '@tauri-apps/plugin-opener': path.resolve(__dirname, 'src/lib/stubs/tauri-opener.ts'),
+            '@tauri-apps/plugin-fs': path.resolve(__dirname, 'src/lib/stubs/tauri-fs.ts'),
+          },
+        }
+      : {}),
+  },
   build: {
     rollupOptions: {
       output: {

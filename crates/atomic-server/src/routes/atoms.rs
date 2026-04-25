@@ -6,8 +6,8 @@ use crate::event_bridge::embedding_event_callback;
 use crate::state::{AppState, ServerEvent};
 use actix_web::{web, HttpResponse};
 use atomic_core::{
-    AtomWithTags, BulkCreateResult, PaginatedAtoms, PaginatedTagChildren, SourceInfo, Tag,
-    TagWithCount,
+    AtomLink, AtomWithTags, BulkCreateResult, PaginatedAtoms, PaginatedTagChildren, SourceInfo,
+    Tag, TagWithCount,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -108,6 +108,55 @@ pub async fn get_atom(db: Db, path: web::Path<String>) -> HttpResponse {
         Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": "Atom not found"})),
         Err(e) => crate::error::error_response(e),
     }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/atoms/{id}/links",
+    params(
+        ("id" = String, Path, description = "Source atom ID"),
+    ),
+    responses(
+        (status = 200, description = "Materialized atom links emitted by this atom", body = Vec<AtomLink>),
+        (status = 500, description = "Internal error", body = ApiErrorResponse),
+    ),
+    tag = "atoms",
+)]
+pub async fn get_atom_links(db: Db, path: web::Path<String>) -> HttpResponse {
+    let id = path.into_inner();
+    ok_or_error(db.0.get_atom_links(&id).await)
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct LinkSuggestionsQuery {
+    /// Title query. Empty returns recent atoms.
+    pub q: Option<String>,
+    /// Max results to return (default: 10, max: 50)
+    pub limit: Option<i32>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/atoms/link-suggestions",
+    params(LinkSuggestionsQuery),
+    responses(
+        (status = 200, description = "Recent atoms or title matches for editor link completion", body = Vec<atomic_core::AtomLinkSuggestion>),
+        (status = 500, description = "Internal error", body = ApiErrorResponse),
+    ),
+    tag = "atoms",
+)]
+pub async fn get_atom_link_suggestions(
+    db: Db,
+    query: web::Query<LinkSuggestionsQuery>,
+) -> HttpResponse {
+    ok_or_error(
+        db.0.suggest_atom_links(
+            query.q.as_deref().unwrap_or_default(),
+            query.limit.unwrap_or(10),
+        )
+        .await,
+    )
 }
 
 #[derive(Deserialize, IntoParams)]

@@ -43,7 +43,7 @@ async fn postgres_storage() -> Option<atomic_core::storage::PostgresStorage> {
     sqlx::raw_sql(
         "TRUNCATE atoms, tags, atom_tags, atom_chunks, atom_positions, \
          semantic_edges, atom_clusters, tag_embeddings, \
-         wiki_articles, wiki_citations, wiki_links, wiki_article_versions, \
+         wiki_articles, wiki_citations, wiki_links, wiki_article_versions, atom_links, \
          conversations, conversation_tags, chat_messages, chat_tool_calls, chat_citations, \
          feeds, feed_tags, feed_items, settings, \
          briefing_citations, briefings, oauth_codes, oauth_clients, api_tokens \
@@ -128,6 +128,205 @@ async fn test_update_atom(storage: &dyn AtomStore) {
 
     let fetched = storage.get_atom(&id).await.unwrap().unwrap();
     assert_eq!(fetched.atom.content, "Updated content");
+}
+
+async fn test_atom_links_materialized(storage: &dyn AtomStore) {
+    let target_id = uuid::Uuid::new_v4().to_string();
+    let source_id = uuid::Uuid::new_v4().to_string();
+    let missing_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    storage
+        .insert_atom(
+            &target_id,
+            &CreateAtomRequest {
+                content: "# Target Atom\n\nBody".to_string(),
+                ..Default::default()
+            },
+            &now,
+        )
+        .await
+        .unwrap();
+    storage
+        .insert_atom(
+            &source_id,
+            &CreateAtomRequest {
+                content: format!(
+                    "Links: [[{}|Target label]], [[{}]], [[future-slug]]",
+                    target_id, missing_id
+                ),
+                ..Default::default()
+            },
+            &now,
+        )
+        .await
+        .unwrap();
+
+    let links = storage.get_atom_links(&source_id).await.unwrap();
+    assert_eq!(links.len(), 3);
+    assert_eq!(links[0].target_atom_id.as_deref(), Some(target_id.as_str()));
+    assert_eq!(links[0].target_title.as_deref(), Some("Target Atom"));
+    assert_eq!(links[0].label.as_deref(), Some("Target label"));
+    assert_eq!(links[0].target_kind, "atom_id");
+    assert_eq!(links[0].status, "resolved");
+    assert_eq!(links[1].raw_target, missing_id);
+    assert_eq!(links[1].status, "missing");
+    assert_eq!(links[2].raw_target, "future-slug");
+    assert_eq!(links[2].target_kind, "text");
+    assert_eq!(links[2].status, "unresolved");
+}
+
+async fn test_atom_links_replaced_on_update(storage: &dyn AtomStore) {
+    let target_id = uuid::Uuid::new_v4().to_string();
+    let source_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    storage
+        .insert_atom(
+            &target_id,
+            &CreateAtomRequest {
+                content: "# Target".to_string(),
+                ..Default::default()
+            },
+            &now,
+        )
+        .await
+        .unwrap();
+    storage
+        .insert_atom(
+            &source_id,
+            &CreateAtomRequest {
+                content: format!("[[{}]]", target_id),
+                ..Default::default()
+            },
+            &now,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(storage.get_atom_links(&source_id).await.unwrap().len(), 1);
+
+    storage
+        .update_atom_content_only(
+            &source_id,
+            &UpdateAtomRequest {
+                content: "No links now".to_string(),
+                source_url: None,
+                published_at: None,
+                tag_ids: None,
+            },
+            &chrono::Utc::now().to_rfc3339(),
+        )
+        .await
+        .unwrap();
+
+    assert!(storage.get_atom_links(&source_id).await.unwrap().is_empty());
+}
+
+async fn test_atom_links_mark_target_missing_on_delete(storage: &dyn AtomStore) {
+    let target_id = uuid::Uuid::new_v4().to_string();
+    let source_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    storage
+        .insert_atom(
+            &target_id,
+            &CreateAtomRequest {
+                content: "# Target".to_string(),
+                ..Default::default()
+            },
+            &now,
+        )
+        .await
+        .unwrap();
+    storage
+        .insert_atom(
+            &source_id,
+            &CreateAtomRequest {
+                content: format!("[[{}|Target]]", target_id),
+                ..Default::default()
+            },
+            &now,
+        )
+        .await
+        .unwrap();
+
+    storage.delete_atom(&target_id).await.unwrap();
+
+    let links = storage.get_atom_links(&source_id).await.unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].raw_target, target_id);
+    assert_eq!(links[0].target_atom_id, None);
+    assert_eq!(links[0].status, "missing");
+}
+
+async fn test_atom_link_suggestions_recent_and_title_ranked(storage: &dyn AtomStore) {
+    let older = "2024-01-01T00:00:00Z";
+    let newer = "2024-01-02T00:00:00Z";
+    let newest = "2024-01-03T00:00:00Z";
+
+    let exact_id = uuid::Uuid::new_v4().to_string();
+    let prefix_id = uuid::Uuid::new_v4().to_string();
+    let contains_id = uuid::Uuid::new_v4().to_string();
+    let body_only_id = uuid::Uuid::new_v4().to_string();
+
+    storage
+        .insert_atom(
+            &prefix_id,
+            &CreateAtomRequest {
+                content: "# Project Atlas Notes\n\nBody".to_string(),
+                ..Default::default()
+            },
+            older,
+        )
+        .await
+        .unwrap();
+    storage
+        .insert_atom(
+            &contains_id,
+            &CreateAtomRequest {
+                content: "# Notes for Project Atlas\n\nBody".to_string(),
+                ..Default::default()
+            },
+            newer,
+        )
+        .await
+        .unwrap();
+    storage
+        .insert_atom(
+            &exact_id,
+            &CreateAtomRequest {
+                content: "# Project Atlas\n\nBody".to_string(),
+                ..Default::default()
+            },
+            older,
+        )
+        .await
+        .unwrap();
+    storage
+        .insert_atom(
+            &body_only_id,
+            &CreateAtomRequest {
+                content: "# Unrelated\n\nProject Atlas only appears in body.".to_string(),
+                ..Default::default()
+            },
+            newest,
+        )
+        .await
+        .unwrap();
+
+    let recent = storage.suggest_atom_links("", 2).await.unwrap();
+    assert_eq!(recent.len(), 2);
+    assert_eq!(recent[0].id, body_only_id);
+    assert_eq!(recent[1].id, contains_id);
+
+    let matches = storage
+        .suggest_atom_links("project atlas", 10)
+        .await
+        .unwrap();
+    let ids: Vec<&str> = matches.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec![exact_id, prefix_id, contains_id]);
+    assert!(!ids.contains(&body_only_id.as_str()));
 }
 
 async fn test_get_all_atoms(storage: &dyn AtomStore) {
@@ -323,6 +522,30 @@ async fn sqlite_update_atom() {
 }
 
 #[tokio::test]
+async fn sqlite_atom_links_materialized() {
+    let (s, _dir) = sqlite_storage().await;
+    test_atom_links_materialized(&s).await;
+}
+
+#[tokio::test]
+async fn sqlite_atom_links_replaced_on_update() {
+    let (s, _dir) = sqlite_storage().await;
+    test_atom_links_replaced_on_update(&s).await;
+}
+
+#[tokio::test]
+async fn sqlite_atom_links_mark_target_missing_on_delete() {
+    let (s, _dir) = sqlite_storage().await;
+    test_atom_links_mark_target_missing_on_delete(&s).await;
+}
+
+#[tokio::test]
+async fn sqlite_atom_link_suggestions_recent_and_title_ranked() {
+    let (s, _dir) = sqlite_storage().await;
+    test_atom_link_suggestions_recent_and_title_ranked(&s).await;
+}
+
+#[tokio::test]
 async fn sqlite_get_all_atoms() {
     let (s, _dir) = sqlite_storage().await;
     test_get_all_atoms(&s).await;
@@ -409,6 +632,19 @@ mod postgres_tests {
     pg_test!(pg_get_atom_not_found, test_get_atom_not_found);
     pg_test!(pg_delete_atom, test_delete_atom);
     pg_test!(pg_update_atom, test_update_atom);
+    pg_test!(pg_atom_links_materialized, test_atom_links_materialized);
+    pg_test!(
+        pg_atom_links_replaced_on_update,
+        test_atom_links_replaced_on_update
+    );
+    pg_test!(
+        pg_atom_links_mark_target_missing_on_delete,
+        test_atom_links_mark_target_missing_on_delete
+    );
+    pg_test!(
+        pg_atom_link_suggestions_recent_and_title_ranked,
+        test_atom_link_suggestions_recent_and_title_ranked
+    );
     pg_test!(pg_get_all_atoms, test_get_all_atoms);
     pg_test!(pg_list_atoms_pagination, test_list_atoms_pagination);
     pg_test!(pg_create_and_get_tags, test_create_and_get_tags);

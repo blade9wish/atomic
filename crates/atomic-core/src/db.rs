@@ -199,7 +199,7 @@ impl Database {
     ///   1. Add a new `if version < N` block at the end (before the virtual-table section)
     ///   2. End the block with `PRAGMA user_version = N;`
     ///   3. Bump LATEST_VERSION
-    const LATEST_VERSION: i32 = 12;
+    const LATEST_VERSION: i32 = 13;
 
     pub fn run_migrations(conn: &Connection) -> Result<(), AtomicCoreError> {
         let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -673,6 +673,37 @@ impl Database {
             )?;
         }
 
+        // --- V12 → V13: Materialized markdown atom links ---
+        if version < 13 {
+            conn.execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS atom_links (
+                    id TEXT PRIMARY KEY,
+                    source_atom_id TEXT NOT NULL,
+                    target_atom_id TEXT,
+                    raw_target TEXT NOT NULL,
+                    label TEXT,
+                    target_kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    start_offset INTEGER,
+                    end_offset INTEGER,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_atom_links_source
+                    ON atom_links(source_atom_id, start_offset);
+                CREATE INDEX IF NOT EXISTS idx_atom_links_target
+                    ON atom_links(target_atom_id)
+                    WHERE target_atom_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_atom_links_status
+                    ON atom_links(status);
+                "#,
+            )?;
+
+            conn.execute_batch("PRAGMA user_version = 13;")?;
+        }
+
         // --- Triggers (recreated every startup to stay current) ---
         conn.execute_batch(
             "DROP TRIGGER IF EXISTS atom_tags_insert_count;
@@ -803,10 +834,7 @@ impl Database {
                 );
                 "#,
             )?;
-            conn.execute(
-                "INSERT INTO atoms_fts(atoms_fts) VALUES('rebuild')",
-                [],
-            )?;
+            conn.execute("INSERT INTO atoms_fts(atoms_fts) VALUES('rebuild')", [])?;
         }
 
         let wiki_fts_sql: String = conn

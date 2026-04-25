@@ -107,6 +107,10 @@
   --atomic-editor-search-bg-active: color-mix(in srgb, var(--color-accent) 60%, transparent 40%);
 }
 
+.cm-tooltip-autocomplete .cm-completionDetail {
+  color: var(--color-text-tertiary);
+}
+
 [data-reader-theme="light"] {
   --color-bg-main: #fafafa;
   --color-bg-panel: #ffffff;

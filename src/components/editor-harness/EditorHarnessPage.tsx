@@ -6,12 +6,52 @@ import '@atomic-editor/editor/styles.css';
 import { useFont, useTheme } from '../../hooks';
 import { useSettingsStore } from '../../stores/settings';
 import { openExternalUrl } from '../../lib/platform';
+import { atomLinkExtension, type AtomLinkSuggestion } from '../../editor/atom-links';
 import { MinimalCodeMirrorEditor } from './MinimalCodeMirrorEditor';
 import { NoPreviewCodeMirrorEditor } from './NoPreviewCodeMirrorEditor';
 import { ScrollDiagnostics } from './ScrollDiagnostics';
 
 type EditorFlavor = 'atomic' | 'no-preview' | 'minimal';
 const EDITOR_FLAVORS: EditorFlavor[] = ['atomic', 'no-preview', 'minimal'];
+const HARNESS_ATOM_LINK_TARGETS: AtomLinkSuggestion[] = [
+  {
+    id: '11111111-1111-4111-8111-111111111111',
+    title: 'Project Atlas',
+    snippet: 'Planning notes for the Atlas workspace.',
+    source: 'title',
+  },
+  {
+    id: '22222222-2222-4222-8222-222222222222',
+    title: 'Project Chronos',
+    snippet: 'Timeline and scheduling notes.',
+    source: 'title',
+  },
+  {
+    id: '44444444-4444-4444-8444-444444444444',
+    title: 'Search Fallback Note',
+    snippet: 'Only discoverable from body text in the harness fallback.',
+    source: 'content',
+  },
+];
+
+const HARNESS_ATOM_LINK_SAMPLE = `# Atom Link Harness
+
+Linked atom: [[11111111-1111-4111-8111-111111111111|Project Atlas]]
+Bare linked atom: [[22222222-2222-4222-8222-222222222222]]
+Missing atom: [[33333333-3333-4333-8333-333333333333]]
+Inline code should stay raw: \`[[11111111-1111-4111-8111-111111111111|Project Atlas]]\`
+`;
+
+type EditorHarnessWindow = Window & {
+  __atomicEditorHarnessAtomResolveCalls?: string[];
+};
+
+function recordHarnessAtomResolveCall(id: string): void {
+  const harnessWindow = window as EditorHarnessWindow;
+  harnessWindow.__atomicEditorHarnessAtomResolveCalls ??= [];
+  harnessWindow.__atomicEditorHarnessAtomResolveCalls.push(id);
+}
+
 import {
   CODE_BLOCKS_MODES,
   LISTS_MODES,
@@ -32,6 +72,22 @@ function formatBytes(chars: number): string {
   if (chars < 1024) return `${chars} B`;
   if (chars < 1024 * 1024) return `${(chars / 1024).toFixed(1)} KB`;
   return `${(chars / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function harnessAtomLinkSuggestions(query: string): AtomLinkSuggestion[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return HARNESS_ATOM_LINK_TARGETS.map((atom) => ({ ...atom, source: 'recent' }));
+  }
+
+  const titleMatches = HARNESS_ATOM_LINK_TARGETS.filter((atom) =>
+    atom.title.toLowerCase().includes(normalized),
+  ).map((atom) => ({ ...atom, source: 'title' as const }));
+  if (titleMatches.length > 0) return titleMatches;
+
+  return HARNESS_ATOM_LINK_TARGETS.filter((atom) =>
+    (atom.snippet ?? '').toLowerCase().includes(normalized),
+  ).map((atom) => ({ ...atom, source: 'content' as const }));
 }
 
 export function EditorHarnessPage() {
@@ -63,16 +119,29 @@ export function EditorHarnessPage() {
     'with code blocks',
   );
   const [flavor, setFlavor] = useState<EditorFlavor>('atomic');
+  const [openedAtomId, setOpenedAtomId] = useState<string | null>(null);
   const markdownSource = useMemo(
     () =>
-      generateSampleMarkdown(size, {
+      `${HARNESS_ATOM_LINK_SAMPLE}\n${generateSampleMarkdown(size, {
         mode,
         separators,
         tables,
         lists,
         codeBlocks,
-      }),
+      })}`,
     [size, mode, separators, tables, lists, codeBlocks],
+  );
+  const atomLinkExtensions = useMemo(
+    () => atomLinkExtension({
+      currentAtomId: 'editor-harness',
+      suggestAtoms: async (query) => harnessAtomLinkSuggestions(query),
+      resolveAtom: async (id) => {
+        recordHarnessAtomResolveCall(id);
+        return HARNESS_ATOM_LINK_TARGETS.find((atom) => atom.id === id) ?? null;
+      },
+      openAtom: setOpenedAtomId,
+    }),
+    [],
   );
 
   const stats = useMemo(() => {
@@ -263,6 +332,9 @@ export function EditorHarnessPage() {
           </div>
 
           <div className="ml-auto flex items-center gap-4 text-xs text-[var(--color-text-secondary)]">
+            <span data-testid="atom-link-opened" className="sr-only">
+              {openedAtomId ?? ''}
+            </span>
             <span>
               <span className="font-mono text-[var(--color-text-primary)]">
                 {stats.lines.toLocaleString()}
@@ -290,6 +362,7 @@ export function EditorHarnessPage() {
                 onLinkClick={(url) => {
                   void openExternalUrl(url);
                 }}
+                extensions={atomLinkExtensions}
               />
             ) : flavor === 'no-preview' ? (
               <NoPreviewCodeMirrorEditor
