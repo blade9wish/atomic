@@ -41,6 +41,17 @@ Bare linked atom: [[22222222-2222-4222-8222-222222222222]]
 Missing atom: [[33333333-3333-4333-8333-333333333333]]
 Inline code should stay raw: \`[[11111111-1111-4111-8111-111111111111|Project Atlas]]\`
 `;
+
+type EditorHarnessWindow = Window & {
+  __atomicEditorHarnessAtomResolveCalls?: string[];
+};
+
+function recordHarnessAtomResolveCall(id: string): void {
+  const harnessWindow = window as EditorHarnessWindow;
+  harnessWindow.__atomicEditorHarnessAtomResolveCalls ??= [];
+  harnessWindow.__atomicEditorHarnessAtomResolveCalls.push(id);
+}
+
 import {
   CODE_BLOCKS_MODES,
   LISTS_MODES,
@@ -124,7 +135,10 @@ export function EditorHarnessPage() {
     () => atomLinkExtension({
       currentAtomId: 'editor-harness',
       suggestAtoms: async (query) => harnessAtomLinkSuggestions(query),
-      resolveAtom: async (id) => HARNESS_ATOM_LINK_TARGETS.find((atom) => atom.id === id) ?? null,
+      resolveAtom: async (id) => {
+        recordHarnessAtomResolveCall(id);
+        return HARNESS_ATOM_LINK_TARGETS.find((atom) => atom.id === id) ?? null;
+      },
       openAtom: setOpenedAtomId,
     }),
     [],

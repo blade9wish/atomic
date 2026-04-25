@@ -243,12 +243,12 @@ async function probeAtomLinkRendering(page) {
     const linkFixtureText = visibleLines
       .filter((line) => line.startsWith('Linked atom:') || line.startsWith('Bare linked atom:'))
       .join('\n');
-    const renderedLinks = Array.from(document.querySelectorAll('.cm-atomic-atom-link-rendered, .cm-atomic-atom-link-widget'))
+    const renderedLinks = Array.from(document.querySelectorAll('.cm-atomic-wiki-link'))
       .map((el) => ({
         text: el.textContent || '',
-        atomId: el.getAttribute('data-atom-id') || '',
+        atomId: el.getAttribute('data-wiki-link-target') || '',
       }));
-    const hiddenSyntax = Array.from(document.querySelectorAll('.cm-atomic-atom-link-hidden-syntax'))
+    const hiddenSyntax = Array.from(document.querySelectorAll('.cm-atomic-wiki-link-hidden-syntax'))
       .map((el) => el.textContent || '')
       .join('\n');
 
@@ -275,6 +275,61 @@ async function probeAtomLinkRendering(page) {
   );
 }
 
+async function probeMissingAtomLinkBackspace(page) {
+  await page.locator('.cm-scroller').evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  await page.waitForTimeout(150);
+
+  const missingLink = page.locator('.cm-atomic-wiki-link-missing').filter({ hasText: 'Missing atom' }).first();
+  const box = await missingLink.boundingBox();
+  if (!box) {
+    record('missing atom link backspace reveals source', 'fail', 'missing link bbox unavailable');
+    return;
+  }
+
+  await page.mouse.click(box.x + box.width + 4, box.y + box.height / 2);
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(150);
+
+  const afterReveal = await page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll('.cm-line')).map((line) => line.textContent || '');
+    return {
+      rawFull: lines.some((line) => line.includes('[[33333333-3333-4333-8333-333333333333]]')),
+      renderedMissing: !!document.querySelector('.cm-atomic-wiki-link-missing'),
+    };
+  });
+
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('Backspace');
+  }
+  await page.waitForTimeout(150);
+
+  const afterBackspacing = await page.evaluate(() => {
+    const lines = Array.from(document.querySelectorAll('.cm-line')).map((line) => line.textContent || '');
+    return {
+      stillEditingMissingLine: lines.some((line) =>
+        line.startsWith('Missing atom: [[') && line.includes('33333333'),
+      ),
+      mergedInlineCode: lines.some((line) =>
+        line.includes('33333333') && line.includes('Inline code should stay raw'),
+      ),
+    };
+  });
+
+  const pass =
+    afterReveal.rawFull &&
+    !afterReveal.renderedMissing &&
+    afterBackspacing.stillEditingMissingLine &&
+    !afterBackspacing.mergedInlineCode;
+
+  record(
+    'missing atom link backspace reveals source',
+    pass ? 'pass' : 'fail',
+    `revealed=${afterReveal.rawFull} rendered=${afterReveal.renderedMissing} mergedNext=${afterBackspacing.mergedInlineCode}`,
+  );
+}
+
 async function probeAtomLinkTypeahead(page) {
   await page.locator('.cm-scroller').evaluate((el) => {
     el.scrollTop = 0;
@@ -290,9 +345,11 @@ async function probeAtomLinkTypeahead(page) {
 
   await page.mouse.click(box.x + Math.min(box.width - 8, 360), box.y + box.height / 2);
   await page.keyboard.press('End');
+  const resolveCallsBefore = await page.evaluate(() => window.__atomicEditorHarnessAtomResolveCalls?.length ?? 0);
   await page.keyboard.insertText(' LINKPROBE [[proj');
   await page.keyboard.press('Control+Space');
   await page.waitForTimeout(250);
+  const resolveCallsAfter = await page.evaluate(() => window.__atomicEditorHarnessAtomResolveCalls?.length ?? 0);
 
   const option = page.locator('.cm-tooltip-autocomplete [role="option"]').filter({ hasText: 'Project Atlas' }).first();
   const optionCount = await option.count();
@@ -315,6 +372,12 @@ async function probeAtomLinkTypeahead(page) {
     'atom link typeahead shows titles',
     optionState.hasLabel && !optionState.showsUuid ? 'pass' : 'fail',
     `option=${JSON.stringify(optionState.text.slice(0, 90))}`,
+  );
+  const resolveCallDelta = resolveCallsAfter - resolveCallsBefore;
+  record(
+    'atom link typeahead avoids atom fetch',
+    resolveCallDelta === 0 ? 'pass' : 'fail',
+    `resolveCalls=${resolveCallDelta}`,
   );
   await page.screenshot({ path: path.join(SCREENSHOT_DIR, '26-atom-link-typeahead.png'), fullPage: false });
 }
@@ -1192,6 +1255,7 @@ async function run() {
     // Must run before any probe that focuses/clicks the editor.
     await probeColdLoadH1Hidden(page);
     await probeAtomLinkRendering(page);
+    await probeMissingAtomLinkBackspace(page);
     await probeClickFreeze(page);
     await probeFenceVisibility(page);
     await probeNewBulletList(page);

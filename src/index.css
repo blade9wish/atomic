@@ -107,44 +107,6 @@
   --atomic-editor-search-bg-active: color-mix(in srgb, var(--color-accent) 60%, transparent 40%);
 }
 
-.cm-atomic-atom-link-rendered,
-.cm-atomic-atom-link-widget {
-  color: var(--atomic-editor-link);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.18em;
-  cursor: text;
-}
-
-.cm-atomic-atom-link-rendered:hover,
-.cm-atomic-atom-link-widget:hover {
-  color: var(--atomic-editor-link-hover);
-}
-
-.cm-atomic-atom-link-unresolved,
-.cm-atomic-atom-link-widget-missing {
-  color: var(--color-text-secondary);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.18em;
-}
-
-.cm-atomic-atom-link-widget {
-  display: inline;
-}
-
-.cm-atomic-atom-link-widget-loading {
-  color: var(--color-text-secondary);
-}
-
-.cm-atomic-atom-link-hidden-syntax {
-  color: transparent;
-  font-size: 0;
-  letter-spacing: 0;
-  user-select: none;
-}
-
 .cm-tooltip-autocomplete .cm-completionDetail {
   color: var(--color-text-tertiary);
 }
