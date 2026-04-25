@@ -2,6 +2,12 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.29.0 — 2026-04-25
+
+- Add atom links: type `[[` in the editor to insert Obsidian-style wiki links to other atoms, with autocomplete suggestions powered by title matching, keyword search, and semantic search fallback
+- Add clickable link resolution in the editor — wiki links display the target atom's title and open it on click
+- Add backend storage and API endpoints for atom links, automatically extracting and persisting `[[…]]` references when atoms are saved
+
 ## v1.28.1 — 2026-04-25
 
 - Bundle all web fonts locally so the app renders correctly offline without needing to reach Google Fonts or Fontshare on launch
