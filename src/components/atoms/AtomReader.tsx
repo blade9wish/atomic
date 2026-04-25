@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { openExternalUrl } from '../../lib/platform';
 import { Modal } from '../ui/Modal';
@@ -6,13 +6,14 @@ import { Input } from '../ui/Input';
 import { TagChip } from '../tags/TagChip';
 import { TagSelector } from '../tags/TagSelector';
 import { MiniGraphPreview } from '../canvas/MiniGraphPreview';
-import { useAtomsStore, type AtomWithTags, type SimilarAtomResult } from '../../stores/atoms';
+import { useAtomsStore, type AtomWithTags, type SemanticSearchResult, type SimilarAtomResult } from '../../stores/atoms';
 import { useTagsStore } from '../../stores/tags';
 import { useUIStore } from '../../stores/ui';
 import { useInlineEditor } from '../../hooks';
 import { formatDate } from '../../lib/date';
 import { getTransport } from '../../lib/transport';
 import { readerEditorActions } from '../../lib/reader-editor-bridge';
+import { atomLinkExtension, type AtomLinkSuggestion, type AtomLinkSuggestionSource } from '../../editor/atom-links';
 import type {
   AtomicCodeMirrorEditorHandle,
   AtomicCodeMirrorEditorProps,
@@ -273,6 +274,64 @@ function AtomReaderContent({
     }
   };
 
+  const suggestAtomLinks = useCallback(async (query: string): Promise<AtomLinkSuggestion[]> => {
+    const trimmed = query.trim();
+    const limit = 12;
+    const transport = getTransport();
+
+    const titleMatches = await transport.invoke<AtomLinkSuggestion[]>('get_atom_link_suggestions', {
+      q: trimmed,
+      limit,
+    });
+    const titleSuggestions = titleMatches
+      .filter((suggestion) => suggestion.id !== atom.id)
+      .map((suggestion) => ({
+        ...suggestion,
+        source: (suggestion.source ?? (trimmed ? 'title' : 'recent')) as AtomLinkSuggestionSource,
+      }));
+
+    if (!trimmed || titleSuggestions.length > 0) return titleSuggestions;
+
+    const keywordMatches = await transport.invoke<SemanticSearchResult[]>('search_atoms_keyword', {
+      query: trimmed,
+      limit,
+    });
+    const keywordSuggestions = searchResultsToAtomLinkSuggestions(keywordMatches, atom.id, 'content');
+    if (keywordSuggestions.length > 0) return keywordSuggestions;
+
+    try {
+      const hybridMatches = await transport.invoke<SemanticSearchResult[]>('search_atoms_hybrid', {
+        query: trimmed,
+        limit,
+        threshold: 0.3,
+      });
+      return searchResultsToAtomLinkSuggestions(hybridMatches, atom.id, 'hybrid');
+    } catch (error) {
+      console.warn('Atom link hybrid fallback failed:', error);
+      return [];
+    }
+  }, [atom.id]);
+
+  const resolveAtomLink = useCallback(async (id: string) => {
+    const linkedAtom = await getTransport().invoke<AtomWithTags | null>('get_atom_by_id', { id });
+    if (!linkedAtom) return null;
+    return {
+      id: linkedAtom.id,
+      title: linkedAtom.title,
+      snippet: linkedAtom.snippet,
+    };
+  }, []);
+
+  const atomLinkExtensions = useMemo(
+    () => atomLinkExtension({
+      currentAtomId: atom.id,
+      suggestAtoms: suggestAtomLinks,
+      resolveAtom: resolveAtomLink,
+      openAtom: onRelatedAtomClick,
+    }),
+    [atom.id, onRelatedAtomClick, resolveAtomLink, suggestAtomLinks],
+  );
+
   return (
     <div
       ref={containerRef}
@@ -297,6 +356,7 @@ function AtomReaderContent({
                   void openExternalUrl(url);
                 }}
                 editorHandleRef={editorHandleRef}
+                extensions={atomLinkExtensions}
               />
             </Suspense>
           </div>
@@ -401,6 +461,21 @@ function AtomReaderContent({
       </Modal>
     </div>
   );
+}
+
+function searchResultsToAtomLinkSuggestions(
+  results: SemanticSearchResult[],
+  currentAtomId: string,
+  source: AtomLinkSuggestionSource,
+): AtomLinkSuggestion[] {
+  return results
+    .filter((result) => result.id !== currentAtomId)
+    .map((result) => ({
+      id: result.id,
+      title: result.title,
+      snippet: result.matching_chunk_content || result.snippet,
+      source,
+    }));
 }
 
 function SidebarRelatedAtoms({ atomId, onAtomClick }: { atomId: string; onAtomClick: (id: string) => void }) {

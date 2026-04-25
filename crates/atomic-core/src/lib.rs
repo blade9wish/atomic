@@ -28,6 +28,7 @@
 //! ```
 
 pub mod agent;
+pub(crate) mod atom_links;
 pub mod briefing;
 pub mod canvas_level;
 pub mod chat;
@@ -1044,6 +1045,26 @@ impl AtomicCore {
         tag_id: &str,
     ) -> Result<Vec<AtomWithTags>, AtomicCoreError> {
         self.storage.get_atoms_by_tag_impl(tag_id).await
+    }
+
+    /// Get materialized `[[...]]` links emitted by an atom.
+    pub async fn get_atom_links(&self, atom_id: &str) -> Result<Vec<AtomLink>, AtomicCoreError> {
+        self.storage.get_atom_links_impl(atom_id).await
+    }
+
+    /// Suggest atoms for editor `[[...]]` completion.
+    ///
+    /// Empty queries return recent atoms. Non-empty queries only match the
+    /// current derived title; content and hybrid fallback should be composed
+    /// by the caller.
+    pub async fn suggest_atom_links(
+        &self,
+        query: &str,
+        limit: i32,
+    ) -> Result<Vec<AtomLinkSuggestion>, AtomicCoreError> {
+        self.storage
+            .suggest_atom_links_impl(query, limit.clamp(1, 50))
+            .await
     }
 
     /// List atoms with pagination, filtering, sorting, and summaries (no full content).
@@ -4586,8 +4607,7 @@ mod tests {
         let tag = db.create_tag("Zebras", None).await.unwrap();
 
         // Insert a wiki article directly (mirrors how wiki generation writes).
-        let content =
-            "Zebras are striped. The zebra herd migrates annually. See also: zebra.";
+        let content = "Zebras are striped. The zebra herd migrates annually. See also: zebra.";
         let wiki_id = {
             let sqlite = db.storage.as_sqlite().unwrap();
             let conn = sqlite.db.conn.lock().unwrap();

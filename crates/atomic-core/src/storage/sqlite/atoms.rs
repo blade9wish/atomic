@@ -5,12 +5,23 @@ use crate::error::AtomicCoreError;
 use crate::models::*;
 use crate::storage::traits::*;
 use crate::{
-    atom_from_row, extract_title_and_snippet, get_all_atom_tags_map, get_all_average_embeddings,
-    get_atom_tags_map_for_ids, get_tags_for_atom, parse_source, CreateAtomRequest, ListAtomsParams,
-    UpdateAtomRequest, ATOM_COLUMNS, ATOM_COLUMNS_A,
+    atom_from_row, atom_links, extract_title_and_snippet, get_all_atom_tags_map,
+    get_all_average_embeddings, get_atom_tags_map_for_ids, get_tags_for_atom, parse_source,
+    CreateAtomRequest, ListAtomsParams, UpdateAtomRequest, ATOM_COLUMNS, ATOM_COLUMNS_A,
 };
 use async_trait::async_trait;
 use rusqlite::OptionalExtension;
+
+fn escape_like_pattern(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
 
 /// Insert the FTS row for an atom. Call after the corresponding row has been
 /// inserted into `atoms` so the external-content select finds the current state.
@@ -30,6 +41,79 @@ fn atoms_fts_delete(conn: &rusqlite::Connection, atom_id: &str) -> rusqlite::Res
         "INSERT INTO atoms_fts(atoms_fts, rowid, id, content)
          SELECT 'delete', rowid, id, content FROM atoms WHERE id = ?1",
         [atom_id],
+    )?;
+    Ok(())
+}
+
+fn replace_atom_links_for_content(
+    conn: &rusqlite::Connection,
+    source_atom_id: &str,
+    content: &str,
+    now: &str,
+) -> StorageResult<()> {
+    conn.execute(
+        "DELETE FROM atom_links WHERE source_atom_id = ?1",
+        [source_atom_id],
+    )?;
+
+    for token in atom_links::extract_atom_link_tokens(content) {
+        let is_atom_id = atom_links::is_uuid_target(&token.raw_target);
+        let target_exists = if is_atom_id {
+            conn.query_row(
+                "SELECT 1 FROM atoms WHERE id = ?1",
+                [&token.raw_target],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some()
+        } else {
+            false
+        };
+        let target_atom_id = target_exists.then(|| token.raw_target.clone());
+        let target_kind = if is_atom_id { "atom_id" } else { "text" };
+        let status = if target_exists {
+            "resolved"
+        } else if is_atom_id {
+            "missing"
+        } else {
+            "unresolved"
+        };
+        let link_id = uuid::Uuid::new_v4().to_string();
+
+        conn.execute(
+            "INSERT INTO atom_links (
+                id, source_atom_id, target_atom_id, raw_target, label,
+                target_kind, status, start_offset, end_offset, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            (
+                &link_id,
+                source_atom_id,
+                &target_atom_id,
+                &token.raw_target,
+                &token.label,
+                target_kind,
+                status,
+                token.start_offset as i32,
+                token.end_offset as i32,
+                now,
+                now,
+            ),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn mark_incoming_atom_links_missing(
+    conn: &rusqlite::Connection,
+    target_atom_id: &str,
+    now: &str,
+) -> StorageResult<()> {
+    conn.execute(
+        "UPDATE atom_links
+         SET target_atom_id = NULL, status = 'missing', updated_at = ?1
+         WHERE target_atom_id = ?2",
+        (now, target_atom_id),
     )?;
     Ok(())
 }
@@ -123,6 +207,7 @@ impl SqliteStorage {
                 )?;
 
                 atoms_fts_insert(&conn, id)?;
+                replace_atom_links_for_content(&conn, id, &request.content, created_at)?;
 
                 for tag_id in &request.tag_ids {
                     conn.execute(
@@ -240,6 +325,15 @@ impl SqliteStorage {
                 atoms_with_tags.push(AtomWithTags { atom, tags: vec![] });
             }
 
+            for (id, request, created_at) in atoms {
+                if let Err(e) =
+                    replace_atom_links_for_content(&conn, id, &request.content, created_at)
+                {
+                    conn.execute_batch("ROLLBACK")?;
+                    return Err(e);
+                }
+            }
+
             conn.execute_batch("COMMIT")?;
 
             // Batch-resolve tags for all created atoms
@@ -337,6 +431,7 @@ impl SqliteStorage {
                         ),
                     )?;
                     atoms_fts_insert(&conn, id)?;
+                    replace_atom_links_for_content(&conn, id, &request.content, updated_at)?;
                 } else {
                     if content_changed {
                         atoms_fts_delete(&conn, id)?;
@@ -368,6 +463,7 @@ impl SqliteStorage {
                             ),
                         )?;
                         atoms_fts_insert(&conn, id)?;
+                        replace_atom_links_for_content(&conn, id, &request.content, updated_at)?;
                     } else {
                         // Content unchanged — FTS stays in sync without a resync.
                         conn.execute(
@@ -385,6 +481,7 @@ impl SqliteStorage {
                                 id,
                             ),
                         )?;
+                        replace_atom_links_for_content(&conn, id, &request.content, updated_at)?;
                     }
                 }
 
@@ -442,6 +539,8 @@ impl SqliteStorage {
         // Explicit delete from atom_tags so the trigger decrements tags.atom_count.
         // (FK CASCADE is off, so this won't happen automatically.)
         conn.execute("DELETE FROM atom_tags WHERE atom_id = ?1", [id])?;
+        conn.execute("DELETE FROM atom_links WHERE source_atom_id = ?1", [id])?;
+        mark_incoming_atom_links_missing(&conn, id, &chrono::Utc::now().to_rfc3339())?;
         // Remove FTS entry *before* deleting the atoms row so external-content
         // delete sees the live content.
         atoms_fts_delete(&conn, id)?;
@@ -793,6 +892,108 @@ impl SqliteStorage {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(results)
+    }
+
+    pub(crate) fn get_atom_links_impl(&self, atom_id: &str) -> StorageResult<Vec<AtomLink>> {
+        let conn = self.db.read_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT al.id,
+                    al.source_atom_id,
+                    al.target_atom_id,
+                    target.title,
+                    al.raw_target,
+                    al.label,
+                    al.target_kind,
+                    al.status,
+                    al.start_offset,
+                    al.end_offset,
+                    al.created_at,
+                    al.updated_at
+             FROM atom_links al
+             LEFT JOIN atoms target ON target.id = al.target_atom_id
+             WHERE al.source_atom_id = ?1
+             ORDER BY al.start_offset ASC, al.created_at ASC",
+        )?;
+        let links = stmt
+            .query_map([atom_id], |row| {
+                Ok(AtomLink {
+                    id: row.get(0)?,
+                    source_atom_id: row.get(1)?,
+                    target_atom_id: row.get(2)?,
+                    target_title: row.get(3)?,
+                    raw_target: row.get(4)?,
+                    label: row.get(5)?,
+                    target_kind: row.get(6)?,
+                    status: row.get(7)?,
+                    start_offset: row.get(8)?,
+                    end_offset: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(links)
+    }
+
+    pub(crate) fn suggest_atom_links_impl(
+        &self,
+        query: &str,
+        limit: i32,
+    ) -> StorageResult<Vec<AtomLinkSuggestion>> {
+        let conn = self.db.read_conn()?;
+        let query = query.trim();
+
+        if query.is_empty() {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, snippet, updated_at
+                 FROM atoms
+                 WHERE TRIM(title) <> ''
+                 ORDER BY updated_at DESC, id DESC
+                 LIMIT ?1",
+            )?;
+            let suggestions = stmt
+                .query_map([limit], |row| {
+                    Ok(AtomLinkSuggestion {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        snippet: row.get(2)?,
+                        updated_at: row.get(3)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(suggestions);
+        }
+
+        let escaped = escape_like_pattern(query);
+        let contains = format!("%{}%", escaped);
+        let prefix = format!("{}%", escaped);
+        let exact = query.to_lowercase();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, snippet, updated_at
+             FROM atoms
+             WHERE TRIM(title) <> ''
+               AND title LIKE ?1 ESCAPE '\\'
+             ORDER BY
+               CASE
+                 WHEN LOWER(title) = ?2 THEN 0
+                 WHEN title LIKE ?3 ESCAPE '\\' THEN 1
+                 ELSE 2
+               END,
+               updated_at DESC,
+               id DESC
+             LIMIT ?4",
+        )?;
+        let suggestions = stmt
+            .query_map((&contains, &exact, &prefix, limit), |row| {
+                Ok(AtomLinkSuggestion {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    snippet: row.get(2)?,
+                    updated_at: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(suggestions)
     }
 
     pub(crate) fn get_embedding_status_impl(&self, atom_id: &str) -> StorageResult<String> {
@@ -1217,6 +1418,18 @@ impl AtomStore for SqliteStorage {
 
     async fn get_atoms_by_tag(&self, tag_id: &str) -> StorageResult<Vec<AtomWithTags>> {
         self.get_atoms_by_tag_impl(tag_id)
+    }
+
+    async fn get_atom_links(&self, atom_id: &str) -> StorageResult<Vec<AtomLink>> {
+        self.get_atom_links_impl(atom_id)
+    }
+
+    async fn suggest_atom_links(
+        &self,
+        query: &str,
+        limit: i32,
+    ) -> StorageResult<Vec<AtomLinkSuggestion>> {
+        self.suggest_atom_links_impl(query, limit)
     }
 
     async fn list_atoms(&self, params: &ListAtomsParams) -> StorageResult<PaginatedAtoms> {

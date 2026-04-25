@@ -29,6 +29,8 @@ pub use utoipa_scalar::{Scalar, Servable};
         // Atoms
         routes::atoms::get_atoms,
         routes::atoms::get_atom,
+        routes::atoms::get_atom_links,
+        routes::atoms::get_atom_link_suggestions,
         routes::atoms::create_atom,
         routes::atoms::update_atom,
         routes::atoms::update_atom_content_only,
@@ -134,6 +136,8 @@ pub use utoipa_scalar::{Scalar, Servable};
     components(schemas(
         // Core types
         atomic_core::Atom,
+        atomic_core::AtomLink,
+        atomic_core::AtomLinkSuggestion,
         atomic_core::Tag,
         atomic_core::AtomWithTags,
         atomic_core::AtomSummary,

@@ -80,6 +80,38 @@ pub struct AtomSummary {
     pub tags: Vec<Tag>,
 }
 
+/// Materialized `[[...]]` link discovered in an atom's markdown content.
+///
+/// The first supported durable target form is an atom UUID. Non-UUID targets
+/// are preserved as unresolved text so future slug/title/alias resolvers can
+/// be layered in without changing the markdown syntax.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AtomLink {
+    pub id: String,
+    pub source_atom_id: String,
+    pub target_atom_id: Option<String>,
+    pub target_title: Option<String>,
+    pub raw_target: String,
+    pub label: Option<String>,
+    pub target_kind: String,
+    pub status: String,
+    pub start_offset: Option<i32>,
+    pub end_offset: Option<i32>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Lightweight atom target for editor link completion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AtomLinkSuggestion {
+    pub id: String,
+    pub title: String,
+    pub snippet: String,
+    pub updated_at: String,
+}
+
 /// Paginated response for atom list
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

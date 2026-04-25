@@ -72,6 +72,16 @@ pub trait AtomStore: Send + Sync {
     /// Get all atoms with a specific tag (including descendants of that tag).
     async fn get_atoms_by_tag(&self, tag_id: &str) -> StorageResult<Vec<AtomWithTags>>;
 
+    /// Get materialized markdown wiki-links emitted by a source atom.
+    async fn get_atom_links(&self, atom_id: &str) -> StorageResult<Vec<AtomLink>>;
+
+    /// Suggest recent atoms or title matches for editor link completion.
+    async fn suggest_atom_links(
+        &self,
+        query: &str,
+        limit: i32,
+    ) -> StorageResult<Vec<AtomLinkSuggestion>>;
+
     /// List atoms with pagination, filtering, and sorting.
     async fn list_atoms(&self, params: &ListAtomsParams) -> StorageResult<PaginatedAtoms>;
 

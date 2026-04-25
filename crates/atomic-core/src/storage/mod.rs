@@ -331,6 +331,10 @@ dispatch! {
         => sqlite: delete_atom_impl, pg_trait: AtomStore, pg_method: delete_atom;
     fn get_atoms_by_tag_impl(&self, tag_id: &str) -> Result<Vec<AtomWithTags>, AtomicCoreError>
         => sqlite: get_atoms_by_tag_impl, pg_trait: AtomStore, pg_method: get_atoms_by_tag;
+    fn get_atom_links_impl(&self, atom_id: &str) -> Result<Vec<AtomLink>, AtomicCoreError>
+        => sqlite: get_atom_links_impl, pg_trait: AtomStore, pg_method: get_atom_links;
+    fn suggest_atom_links_impl(&self, query: &str, limit: i32) -> Result<Vec<AtomLinkSuggestion>, AtomicCoreError>
+        => sqlite: suggest_atom_links_impl, pg_trait: AtomStore, pg_method: suggest_atom_links;
     fn list_atoms_impl(&self, params: &ListAtomsParams) -> Result<PaginatedAtoms, AtomicCoreError>
         => sqlite: list_atoms_impl, pg_trait: AtomStore, pg_method: list_atoms;
     fn get_source_list_impl(&self) -> Result<Vec<SourceInfo>, AtomicCoreError>
