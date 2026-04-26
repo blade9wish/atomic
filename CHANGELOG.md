@@ -2,6 +2,12 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.31.0 — 2026-04-26
+
+- Add database export as a markdown ZIP archive with progress tracking, available from the Databases tab in Settings
+- Fix toast notifications sometimes appearing behind other UI elements
+- Improve sidecar process logging for better diagnostics
+
 ## v1.30.1 — 2026-04-26
 
 - Add Gemini Embedding 2 Preview, Perplexity Embed V1 4B, and NVIDIA Nemotron VL (free) to the embedding model picker; remove the unavailable Codestral Embed 2505
