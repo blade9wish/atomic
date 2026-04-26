@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Trash2 } from 'lucide-react';
 import { openExternalUrl } from '../../lib/platform';
 import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
@@ -52,6 +52,7 @@ export function AtomReader({ atomId, highlightText, initialEditing }: AtomReader
   const setSelectedTag = useUIStore(s => s.setSelectedTag);
   const overlayNavigate = useUIStore(s => s.overlayNavigate);
   const overlayDismiss = useUIStore(s => s.overlayDismiss);
+  const removeAtomFromTabs = useUIStore(s => s.removeAtomFromTabs);
 
   const [atom, setAtom] = useState<AtomWithTags | null>(null);
   const [isLoadingAtom, setIsLoadingAtom] = useState(true);
@@ -135,11 +136,11 @@ export function AtomReader({ atomId, highlightText, initialEditing }: AtomReader
           onDelete={async () => {
             await deleteAtom(atomId);
             await fetchTags();
-            overlayDismiss();
+            removeAtomFromTabs(atomId);
           }}
           onTagClick={(tagId) => { setSelectedTag(tagId); overlayDismiss(); }}
-          onRelatedAtomClick={(id) => overlayNavigate({ type: 'reader', atomId: id })}
-          onViewGraph={() => overlayNavigate({ type: 'graph', atomId })}
+          onRelatedAtomClick={(id, opts) => overlayNavigate({ type: 'reader', atomId: id }, opts)}
+          onViewGraph={(opts) => overlayNavigate({ type: 'graph', atomId }, opts)}
           onAtomUpdated={(updated) => setAtom(updated)}
         />
       )}
@@ -154,8 +155,8 @@ interface AtomReaderContentProps {
   onDismiss: () => void;
   onDelete: () => Promise<void>;
   onTagClick: (tagId: string) => void;
-  onRelatedAtomClick: (atomId: string) => void;
-  onViewGraph: () => void;
+  onRelatedAtomClick: (atomId: string, opts?: { newTab?: boolean }) => void;
+  onViewGraph: (opts?: { newTab?: boolean }) => void;
   onAtomUpdated?: (atom: AtomWithTags) => void;
 }
 
@@ -327,7 +328,7 @@ function AtomReaderContent({
       currentAtomId: atom.id,
       suggestAtoms: suggestAtomLinks,
       resolveAtom: resolveAtomLink,
-      openAtom: onRelatedAtomClick,
+      openAtom: (id, opts) => onRelatedAtomClick(id, opts),
     }),
     [atom.id, onRelatedAtomClick, resolveAtomLink, suggestAtomLinks],
   );
@@ -361,14 +362,28 @@ function AtomReaderContent({
             </Suspense>
           </div>
 
-          <div className="hidden lg:block w-80 shrink-0 border border-[var(--color-border)] rounded-lg p-4 self-start">
+          <div className="w-full lg:w-80 lg:shrink-0 mt-6 lg:mt-0 border border-[var(--color-border)] rounded-lg p-4 self-start">
             <div className="mb-4">
-              <Input
-                value={editSourceUrl}
-                onChange={(e) => setEditSourceUrl(e.target.value)}
-                placeholder="Source URL (optional)"
-                className="text-xs"
-              />
+              {/* Source URL + delete share a row — delete sits to the right
+                  of the input. */}
+              <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <Input
+                    value={editSourceUrl}
+                    onChange={(e) => setEditSourceUrl(e.target.value)}
+                    placeholder="Source URL (optional)"
+                    className="text-xs"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowDeleteModal(true)}
+                  className="shrink-0 p-1.5 rounded text-[var(--color-text-secondary)] hover:text-red-400 hover:bg-[var(--color-bg-hover)] transition-colors"
+                  title="Delete atom"
+                  aria-label="Delete atom"
+                >
+                  <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
+                </button>
+              </div>
               {atom.source_url && (
                 <button
                   type="button"
@@ -478,7 +493,7 @@ function searchResultsToAtomLinkSuggestions(
     }));
 }
 
-function SidebarRelatedAtoms({ atomId, onAtomClick }: { atomId: string; onAtomClick: (id: string) => void }) {
+function SidebarRelatedAtoms({ atomId, onAtomClick }: { atomId: string; onAtomClick: (id: string, opts?: { newTab?: boolean }) => void }) {
   const [relatedAtoms, setRelatedAtoms] = useState<SimilarAtomResult[]>([]);
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -517,7 +532,13 @@ function SidebarRelatedAtoms({ atomId, onAtomClick }: { atomId: string; onAtomCl
             relatedAtoms.map((result) => (
               <button
                 key={result.id}
-                onClick={() => onAtomClick(result.id)}
+                onClick={(e) => onAtomClick(result.id, { newTab: e.metaKey || e.ctrlKey })}
+                onAuxClick={(e) => {
+                  if (e.button === 1) {
+                    e.preventDefault();
+                    onAtomClick(result.id, { newTab: true });
+                  }
+                }}
                 className="w-full text-left p-2 rounded-md hover:bg-[var(--color-bg-hover)] transition-colors"
               >
                 <p className="text-xs text-[var(--color-text-primary)] line-clamp-2">
