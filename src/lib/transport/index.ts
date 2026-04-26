@@ -29,6 +29,12 @@ function wireConnectionCallback(transport: Transport): void {
   };
 }
 
+function connectInBackground(transport: Transport): void {
+  void transport.connect().catch((err) => {
+    console.error('Transport connection failed:', err);
+  });
+}
+
 export function getTransport(): Transport {
   if (!activeTransport) throw new Error('Transport not initialized. Call initTransport() first.');
   return activeTransport;
@@ -46,7 +52,7 @@ export async function initTransport(): Promise<void> {
 
     activeTransport = new HttpTransport(config);
     wireConnectionCallback(activeTransport);
-    await activeTransport.connect();
+    connectInBackground(activeTransport);
   } else {
     // Web SPA — require explicit config from localStorage or prompt user
     const saved = localStorage.getItem('atomic-server-config');
@@ -54,7 +60,7 @@ export async function initTransport(): Promise<void> {
       const config: HttpTransportConfig = JSON.parse(saved);
       activeTransport = new HttpTransport(config);
       wireConnectionCallback(activeTransport);
-      await activeTransport.connect();
+      connectInBackground(activeTransport);
       void syncSharedConfig({ serverURL: config.baseUrl, apiToken: config.authToken });
     } else {
       // Create a disconnected HttpTransport — user must configure via settings
