@@ -188,17 +188,17 @@ pub fn run() {
                     while let Some(event) = rx.recv().await {
                         match event {
                             CommandEvent::Stdout(line) => {
-                                tracing::debug!(output = %String::from_utf8_lossy(&line), "sidecar stdout");
+                                tracing::info!(output = %String::from_utf8_lossy(&line), "sidecar stdout");
                             }
                             CommandEvent::Stderr(line) => {
-                                tracing::debug!(output = %String::from_utf8_lossy(&line), "sidecar stderr");
+                                tracing::warn!(output = %String::from_utf8_lossy(&line), "sidecar stderr");
                             }
                             CommandEvent::Terminated(payload) => {
                                 tracing::info!(?payload, "sidecar terminated");
                                 break;
                             }
                             CommandEvent::Error(err) => {
-                                tracing::debug!(error = %err, "sidecar error");
+                                tracing::warn!(error = %err, "sidecar error");
                             }
                             _ => {}
                         }
@@ -223,7 +223,7 @@ pub fn run() {
                         .send()
                     {
                         Ok(resp) if resp.status().is_success() => {
-                            tracing::debug!(url = %base_url, elapsed_ms = start.elapsed().as_millis(), "Sidecar ready");
+                            tracing::info!(url = %base_url, elapsed_ms = start.elapsed().as_millis(), "Sidecar ready");
                             break;
                         }
                         _ => {
