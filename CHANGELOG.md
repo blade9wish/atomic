@@ -2,6 +2,13 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.32.1 — 2026-04-26
+
+- Anchor atom preview popover to its canvas node so the popover follows during pan and zoom
+- Fix canvas panning accidentally dismissing the atom preview popover by distinguishing drags from clicks
+- Hide labels for unrelated atoms when a node is pinned, so only the selected atom and its neighbors are labeled
+- Carry the dashboard preview's camera position into the full canvas view so it opens at the same framing
+
 ## v1.32.0 — 2026-04-26
 
 - Add tab navigation — open atoms, wiki articles, and graphs in persistent tabs with per-tab back/forward history, drag-and-drop reordering, and Cmd/middle-click to open in a new tab
