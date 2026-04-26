@@ -2,6 +2,10 @@
 
 All notable changes to Atomic are documented here.
 
+## v1.30.1 — 2026-04-26
+
+- Add Gemini Embedding 2 Preview, Perplexity Embed V1 4B, and NVIDIA Nemotron VL (free) to the embedding model picker; remove the unavailable Codestral Embed 2505
+
 ## v1.30.0 — 2026-04-25
 
 - Unify embedding and tagging into a single pipeline queue with a simplified progress banner showing remaining counts instead of separate progress bars
