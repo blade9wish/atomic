@@ -155,12 +155,12 @@ export async function downloadExportJob(job: ExportJob): Promise<void> {
     throw new Error('Not connected to a server');
   }
 
-  const url = `${baseUrl}${job.download_path}`;
   if (isTauri()) {
-    await saveExportJobWithTauri(url, job);
+    await saveExportJobWithTauri(baseUrl, job);
     return;
   }
 
+  const url = `${baseUrl}${job.download_path}`;
   const a = document.createElement('a');
   a.href = url;
   a.rel = 'noopener noreferrer';
@@ -169,32 +169,17 @@ export async function downloadExportJob(job: ExportJob): Promise<void> {
   document.body.removeChild(a);
 }
 
-async function saveExportJobWithTauri(url: string, job: ExportJob): Promise<void> {
-  const [{ save }, { writeFile }] = await Promise.all([
-    import('@tauri-apps/plugin-dialog'),
-    import('@tauri-apps/plugin-fs'),
-  ]);
+async function saveExportJobWithTauri(baseUrl: string, job: ExportJob): Promise<void> {
+  if (!job.download_path) {
+    throw new Error('Export is complete but no download URL was issued');
+  }
 
-  const filePath = await save({
-    title: 'Save Markdown Export',
-    defaultPath: defaultExportFilename(job),
-    filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('save_markdown_export', {
+    baseUrl,
+    downloadPath: job.download_path,
+    defaultFileName: defaultExportFilename(job),
   });
-
-  if (!filePath) return;
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    const message = await response.text().catch(() => response.statusText);
-    throw new Error(message || `Download failed with status ${response.status}`);
-  }
-
-  if (response.body) {
-    await writeFile(filePath, response.body);
-    return;
-  }
-
-  await writeFile(filePath, new Uint8Array(await response.arrayBuffer()));
 }
 
 function defaultExportFilename(job: ExportJob): string {
