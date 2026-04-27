@@ -1,29 +1,74 @@
-[workspace]
-resolver = "2"
-members = [
-    "src-tauri",
-    "crates/atomic-core",
-    "crates/atomic-server",
-    "crates/mcp-bridge",
-    "crates/atomic-cloud",
-]
+[package]
+name = "atomic"
+version = "0.1.0"
+edition = "2021"
+authors = ["atomic contributors"]
+description = "A fast, lightweight key-value store with atomic operations"
+license = "MIT"
+repository = "https://github.com/atomic-rs/atomic"
+readme = "README.md"
+keywords = ["key-value", "atomic", "storage", "database"]
+categories = ["database", "data-structures"]
 
-[profile.dev]
-debug = 1                  # Line tables only (enough for backtraces, much smaller)
+[[bin]]
+name = "atomic"
+path = "src/main.rs"
 
-[profile.dev.package."*"]
-debug = false              # No debug info for dependencies
+[lib]
+name = "atomic_lib"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP server
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Configuration
+config = "0.14"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# UUID generation
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Hashing
+sha2 = "0.10"
+hex = "0.4"
+
+# Concurrent data structures
+dashmap = "5"
+
+[dev-dependencies]
+tokio-test = "0.4"
+httptest = "0.15"
+reqwest = { version = "0.11", features = ["json"] }
 
 [profile.release]
-opt-level = "z"        # Optimize for size
-lto = true             # Enable Link Time Optimization
-codegen-units = 1      # Better optimization (slower compile)
-strip = true           # Strip symbols to reduce binary size
-panic = "abort"        # Smaller binary by removing unwinding code
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
 
-# Faster release builds for Docker/server (skips expensive LTO + single codegen unit)
-[profile.server]
-inherits = "release"
-opt-level = 2          # Standard optimization (not size-focused)
-lto = "thin"           # Much faster than full LTO, still good perf
-codegen-units = 16     # Parallel codegen (default)
+[profile.dev]
+opt-level = 0
+debug = true
