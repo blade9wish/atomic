@@ -61,7 +61,8 @@ dashmap = "5"
 [dev-dependencies]
 tokio-test = "0.4"
 httptest = "0.15"
-reqwest = { version = "0.11", features = ["json"] }
+# bumped to 0.12 for improved async support and http2
+reqwest = { version = "0.12", features = ["json"] }
 
 [profile.release]
 opt-level = 3
