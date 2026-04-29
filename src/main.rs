@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("atomic=info".parse()?),
+                .add_directive("atomic=debug".parse()?), // changed from info to debug for local dev
         )
         .init();
 
