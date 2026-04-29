@@ -73,3 +73,5 @@ strip = true
 [profile.dev]
 opt-level = 0
 debug = true
+# faster incremental builds during local dev
+split-debuginfo = "unpacked"
