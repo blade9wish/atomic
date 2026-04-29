@@ -75,3 +75,5 @@ opt-level = 0
 debug = true
 # faster incremental builds during local dev
 split-debuginfo = "unpacked"
+# reduce debug info verbosity to speed up linking on my machine
+debug = 1
